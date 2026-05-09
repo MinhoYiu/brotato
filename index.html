@@ -368,6 +368,7 @@ function createPlayer(charId) {
       if (ch.stats.lifesteal !== undefined) base.lifesteal = ch.stats.lifesteal;
       if (ch.weapons) {
         base.weapons = ch.weapons.map(id => ({ id, cd: 0, tier: 0 }));
+        base.weapons = ch.weapons.map(id => ({ id, cd: 0 }));
       }
       if (ch.materialBonus) game.materialBonus = ch.materialBonus;
     }
@@ -1738,7 +1739,7 @@ function showCharacterSelect() {
   document.getElementById("restartBtn").style.display = "none";
   let html = "<div class=\"char-grid\">";
   for (const c of CHARACTERS) {
-    html += "<div class=\"char-card\" onclick=\"startGame(\"" + c.id + "\")\">";
+    html += "<div class=\"char-card\" onclick=\"startGame('" + c.id + "')\">";
     html += "<div class=\"c-icon\">" + c.icon + "</div>";
     html += "<div class=\"c-name\">" + c.name + "</div>";
     html += "<div class=\"c-desc\">" + c.desc + "</div>";
