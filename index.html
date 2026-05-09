@@ -306,8 +306,8 @@ const CHARACTERS = [
 ];
 
 // ======================== ENTITY CREATION ========================
-function createPlayer() {
-  return {
+function createPlayer(charId) {
+  const base = {
     x: CONFIG.ARENA_W / 2, y: CONFIG.ARENA_H / 2,
     radius: CONFIG.PLAYER_RADIUS,
     hp: 10, maxHp: 10,
@@ -322,7 +322,31 @@ function createPlayer() {
     invincible: 0,
     angle: 0,
     color: null,
+    passives: {
+      explodeOnKill: false,
+      magnetRange: 200,
+      thorns: 0,
+      bulletSplit: 0,
+      extraProjectiles: 0,
+      dodge: 0,
+    },
   };
+  // Apply character stats
+  if (charId) {
+    const ch = CHARACTERS.find(c => c.id === charId);
+    if (ch) {
+      if (ch.stats.dmgMult) base.dmgMult = ch.stats.dmgMult;
+      if (ch.stats.armor !== undefined) base.armor = ch.stats.armor;
+      if (ch.stats.rngMult) base.rngMult = ch.stats.rngMult;
+      if (ch.stats.aspdMult) base.aspdMult = ch.stats.aspdMult;
+      if (ch.stats.lifesteal !== undefined) base.lifesteal = ch.stats.lifesteal;
+      if (ch.weapons) {
+        base.weapons = ch.weapons.map(id => ({ id, cd: 0 }));
+      }
+      if (ch.materialBonus) game.materialBonus = ch.materialBonus;
+    }
+  }
+  return base;
 }
 
 function createEnemy(type, x, y) {
@@ -330,9 +354,15 @@ function createEnemy(type, x, y) {
     basic: { hp: 3, speed: 50, damage: 1, radius: 12, xp: 1, sprite: SPRITE_BASIC, color: '#c0392b', size: 24 },
     fast: { hp: 1, speed: 110, damage: 1, radius: 9, xp: 1, sprite: SPRITE_FAST, color: '#27ae60', size: 20 },
     heavy: { hp: 10, speed: 35, damage: 2, radius: 16, xp: 3, sprite: SPRITE_HEAVY, color: '#8e44ad', size: 28 },
+    ranged: { hp: 2, speed: 45, damage: 1, radius: 10, xp: 2, sprite: SPRITE_FAST, color: '#3498db', size: 22, behavior: 'ranged' },
+    exploder: { hp: 2, speed: 90, damage: 2, radius: 11, xp: 2, sprite: SPRITE_BASIC, color: '#e67e22', size: 22, behavior: 'exploder', explodeRadius: 60 },
+    summoner: { hp: 6, speed: 30, damage: 1, radius: 14, xp: 4, sprite: SPRITE_HEAVY, color: '#9b59b6', size: 28, behavior: 'summoner', minionCount: 2 },
+    elite: { hp: 15, speed: 40, damage: 2, radius: 16, xp: 6, sprite: SPRITE_HEAVY, color: '#f1c40f', size: 32, behavior: 'elite', auraRadius: 150 },
+    boss: { hp: 50, speed: 25, damage: 3, radius: 22, xp: 20, sprite: SPRITE_HEAVY, color: '#8e44ad', size: 48, behavior: 'boss' },
   };
   const def = defs[type];
-  return {
+  if (!def) return defs.basic ? createEnemy('basic', x, y) : null;
+  const enemy = {
     x, y, type,
     hp: def.hp + Math.floor(game.wave * 0.5),
     maxHp: def.hp + Math.floor(game.wave * 0.5),
@@ -346,6 +376,11 @@ function createEnemy(type, x, y) {
     vx: 0, vy: 0,
     hitFlash: 0,
   };
+  if (def.behavior) enemy.behavior = def.behavior;
+  if (def.explodeRadius !== undefined) enemy.explodeRadius = def.explodeRadius;
+  if (def.minionCount !== undefined) enemy.minionCount = def.minionCount;
+  if (def.auraRadius !== undefined) enemy.auraRadius = def.auraRadius;
+  return enemy;
 }
 
 function createProjectile(x, y, angle, weapon, player) {
@@ -1349,7 +1384,7 @@ function showCharacterSelect() {
   document.getElementById("restartBtn").style.display = "none";
   let html = "<div class=\"char-grid\">";
   for (const c of CHARACTERS) {
-    html += "<div class=\"char-card\" onclick=\"startGame(\"" + c.id + "\")\">";
+    html += "<div class=\"char-card\" onclick=\"startGame('" + c.id + "')\">";
     html += "<div class=\"c-icon\">" + c.icon + "</div>";
     html += "<div class=\"c-name\">" + c.name + "</div>";
     html += "<div class=\"c-desc\">" + c.desc + "</div>";
