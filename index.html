@@ -251,6 +251,7 @@ const game = {
   damageNumbers: [],
   shakeTimer: 0,
   freezeFrames: 0, character: null, materialBonus: 0, difficulty: 'normal', enemyMult: 1.0, bossActive: false, bossSpawned: false, bossDefeated: false,
+  freezeFrames: 0, character: null, materialBonus: 0, bossActive: false, bossSpawned: false, bossDefeated: false,
 };
 
 const keys = { w: false, a: false, s: false, d: false };
@@ -273,6 +274,9 @@ const WEAPON_DEFS = {
   flamethrower: { name: "火焰喷射器", icon: "🔥", type: "ranged", damage: 1, cooldown: 0.05, range: 120, speed: 300, aoe: 0, knockback: 15, color: "#e74c3c", cost: 30, desc: "持续喷射火焰", sound: 'flamethrower' },
   smg: { name: "冲锋枪", icon: "🔫", type: "ranged", damage: 1, cooldown: 0.08, range: 240, speed: 600, aoe: 0, knockback: 15, color: "#bbb", cost: 25, desc: "高速散射", spread: 0.15, sound: 'smg' },
   laser: { name: "激光枪", icon: "🔦", type: "ranged", damage: 5, cooldown: 0.6, range: 400, speed: 800, aoe: 0, knockback: 50, color: "#2ecc71", cost: 35, desc: "穿透敌人", penetrate: true, sound: 'laser' },
+  flamethrower: { name: "火焰喷射器", icon: "🔥", type: "ranged", damage: 1, cooldown: 0.05, range: 120, speed: 300, aoe: 0, knockback: 15, color: "#e74c3c", cost: 30, desc: "持续喷射火焰" },
+  smg: { name: "冲锋枪", icon: "🔫", type: "ranged", damage: 1, cooldown: 0.08, range: 240, speed: 600, aoe: 0, knockback: 15, color: "#bbb", cost: 25, desc: "高速散射", spread: 0.15 },
+  laser: { name: "激光枪", icon: "🔦", type: "ranged", damage: 5, cooldown: 0.6, range: 400, speed: 800, aoe: 0, knockback: 50, color: "#2ecc71", cost: 35, desc: "穿透敌人", penetrate: true },
   axe: { name: "回旋斧", icon: "🪓", type: "melee", damage: 6, cooldown: 1.0, range: 70, aoe: 360, knockback: 200, color: "#888", cost: 20, desc: "大范围回旋斩" },
   mine: { name: "地雷", icon: "💣", type: "mine", damage: 12, cooldown: 3.0, range: 0, aoe: 80, knockback: 400, color: "#555", cost: 15, desc: "放置地雷" }
 };
@@ -491,6 +495,7 @@ function fireWeapon(player, weapon, enemy) {
     }
   } else if (def.type === 'mine') {
     const mine = createProjectile(player.x, player.y, angle, def, player, tier.mult);
+    const mine = createProjectile(player.x, player.y, angle, def, player);
     mine.vx = 0; mine.vy = 0;
     mine.isMine = true;
     mine.radius = 6;
@@ -504,6 +509,9 @@ function fireWeapon(player, weapon, enemy) {
     if (player.passives.bulletSplit > 0 && Math.random() < player.passives.bulletSplit) {
       const splitAngle = angle + (Math.random() - 0.5) * 0.8;
       const splitProj = createProjectile(player.x, player.y, splitAngle, def, player, tier.mult);
+    if (player.passives.bulletSplit > 0 && Math.random() < player.passives.bulletSplit) {
+      const splitAngle = angle + (Math.random() - 0.5) * 0.8;
+      const splitProj = createProjectile(player.x, player.y, splitAngle, def, player);
       game.projectiles.push(splitProj);
     }
   }
@@ -545,6 +553,13 @@ function getWaveEnemies(wave) {
   const exploder = wave >= 6 ? Math.floor((wave - 4) * 1.0 * mult) : 0;
   const summoner = wave >= 8 ? Math.floor((wave - 6) * 0.8 * mult) : 0;
   const elite = wave >= 10 ? Math.floor((wave - 8) * 0.6 * mult) : 0;
+  const basic = 3 + wave * 2;
+  const fast = wave >= 2 ? Math.floor((wave - 1) * 1.2) : 0;
+  const heavy = wave >= 3 ? Math.floor((wave - 2) * 0.8) : 0;
+  const ranged = wave >= 4 ? Math.floor((wave - 2) * 0.7) : 0;
+  const exploder = wave >= 6 ? Math.floor((wave - 4) * 0.5) : 0;
+  const summoner = wave >= 8 ? Math.floor((wave - 6) * 0.4) : 0;
+  const elite = wave >= 10 ? Math.floor((wave - 8) * 0.3) : 0;
   return { basic, fast, heavy, ranged, exploder, summoner, elite };
 }
 
@@ -1010,6 +1025,11 @@ function updateGame(dt) {
         } else {
           p.hp -= dmg;
         playSound('player_hit');
+        const dmg = Math.max(1, e.damage - p.armor);
+        if (p.passives.dodge > 0 && Math.random() < p.passives.dodge) {
+          createDamageNumber(p.x, p.y, 0, '#3498db');
+        } else {
+          p.hp -= dmg;
         if (p.passives.thorns > 0) {
             e.hp -= p.passives.thorns;
             createDamageNumber(e.x, e.y, p.passives.thorns, '#27ae60');
@@ -1119,6 +1139,7 @@ function updateGame(dt) {
             game.shakeTimer = 0.15;
             playSound(proj.isMine ? 'mine_explode' : 'explosion');
 
+          
             } else {
               e.hp -= proj.damage;
               e.hitFlash = 0.15;
@@ -1143,6 +1164,9 @@ function updateGame(dt) {
         p.invincible = 0.3;
         createParticle(p.x, p.y, '#e74c3c', 6);
         playSound('player_hit');
+        p.hp -= proj.damage;
+        p.invincible = 0.3;
+        createParticle(p.x, p.y, '#e74c3c', 6);
         destroyed = true;
         if (p.hp <= 0) { p.hp = 0; gameOver(); return; }
       }
@@ -1676,6 +1700,9 @@ function setDifficulty(id) {
   }
 }
 
+  showCharacterSelect();
+}
+
 function startGame(charId) {
   document.getElementById("overlay").classList.remove("show");
   game.character = charId;
@@ -1707,6 +1734,11 @@ function showCharacterSelect() {
   html += "<div class=\"char-grid\">";
   for (const c of CHARACTERS) {
     html += "<div class=\"char-card\" onclick=\"startGame('" + c.id + "')\">";
+  document.getElementById("overlaySub").textContent = "选择你的角色";
+  document.getElementById("restartBtn").style.display = "none";
+  let html = "<div class=\"char-grid\">";
+  for (const c of CHARACTERS) {
+    html += "<div class=\"char-card\" onclick=\"startGame(\"" + c.id + "\")\">";
     html += "<div class=\"c-icon\">" + c.icon + "</div>";
     html += "<div class=\"c-name\">" + c.name + "</div>";
     html += "<div class=\"c-desc\">" + c.desc + "</div>";
