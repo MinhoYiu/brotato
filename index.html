@@ -22,11 +22,12 @@ canvas{display:block;background:#1a1a2e;border:2px solid #333}
 .xp-fill{height:100%;background:#2ecc71;transition:width 0.2s}
 .shield-display{font-size:10px;color:#3498db;text-shadow:1px 1px 0 #000;margin-left:4px;display:inline-flex;align-items:center;gap:2px}
 .hp-row{display:flex;align-items:center;gap:4px}
-#weapon-bar{position:absolute;bottom:8px;left:50%;transform:translateX(-50%);display:flex;gap:4px}
-.weapon-slot{width:44px;height:44px;background:rgba(0,0,0,0.7);border:1px solid #555;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:7px;color:#aaa}
+#weapon-bar{position:absolute;bottom:8px;left:50%;transform:translateX(-50%);display:flex;gap:4px;z-index:15}
+.weapon-slot{width:44px;height:44px;background:rgba(0,0,0,0.7);border:1px solid #555;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:7px;color:#aaa;cursor:default;position:relative}
 .weapon-slot.active{border-color:#f39c12}
 .weapon-slot .w-icon{font-size:16px}
 .weapon-slot .w-key{position:absolute;top:2px;right:2px;font-size:7px;color:#777}
+#weapon-tooltip{display:none;position:absolute;bottom:60px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.9);border:1px solid #555;padding:6px 10px;font-size:9px;color:#ccc;white-space:nowrap;pointer-events:none;z-index:20;border-radius:4px}
 #overlay{position:absolute;top:0;left:0;width:100%;height:100%;display:none;flex-direction:column;justify-content:center;align-items:center;background:rgba(0,0,0,0.85);pointer-events:auto;z-index:10}
 #overlay.show{display:flex}
 #overlay h1{font-size:24px;margin-bottom:16px;color:#e74c3c;text-shadow:2px 2px 0 #000}
@@ -82,6 +83,7 @@ canvas{display:block;background:#1a1a2e;border:2px solid #333}
 </div>
 </div>
 <div id="weapon-bar"></div>
+<div id="weapon-tooltip"></div>
 <div id="boss-hud" style="display:none;position:absolute;top:28px;left:50%;transform:translateX(-50%);width:300px;text-align:center;pointer-events:none">
   <div style="font-size:10px;color:#8e44ad;margin-bottom:2px">BOSS</div>
   <div style="width:100%;height:10px;background:#333;border:1px solid #8e44ad">
@@ -107,6 +109,23 @@ const CONFIG = {
   PLAYER_RADIUS: 14,
   MAX_WEAPONS: 6, WAVE_DURATION: 30,
 };
+
+// ======================== GAME SETTINGS ========================
+const DEFAULT_SETTINGS = { waveDuration: 30, combineCount: 3 };
+let gameSettings = { ...DEFAULT_SETTINGS };
+
+function getWaveDuration() {
+  return gameSettings.waveDuration || CONFIG.WAVE_DURATION;
+}
+
+function adjustSetting(key, delta) {
+  if (key === 'waveDuration') {
+    gameSettings.waveDuration = Math.max(15, Math.min(60, gameSettings.waveDuration + delta));
+  } else if (key === 'combineCount') {
+    gameSettings.combineCount = gameSettings.combineCount === 2 ? 3 : 2;
+  }
+  showCharacterSelect();
+}
 
 // ======================== SPRITE DATA (16x16 pixel art) ========================
 const PALETTE = {
@@ -288,6 +307,13 @@ const TIERS = [
   { name: '史诗', color: '#9b59b6', mult: 3.5 },
   { name: '传说', color: '#e74c3c', mult: 5.0 },
 ];
+
+const TIER_COST_MULT = [1, 1.5, 2.5, 4, 6];
+
+function getWeaponShopTier(wave) {
+  const maxTier = wave >= 17 ? 4 : wave >= 13 ? 3 : wave >= 8 ? 2 : wave >= 4 ? 1 : 0;
+  return Math.floor(Math.random() * (maxTier + 1));
+}
 
 const SHOP_ITEMS = [
   { id: 'hp', name: '生命恢复', desc: '恢复 3 HP', icon: '❤️', cost: 5, effect: (p) => { p.hp = Math.min(p.hp + 3, p.maxHp); } },
@@ -567,7 +593,7 @@ function getWaveEnemies(wave) {
 function getSpawnInterval(wave) {
   const counts = getWaveEnemies(wave);
   const total = counts.basic + counts.fast + counts.heavy + counts.ranged + counts.exploder + counts.summoner + counts.elite;
-  return Math.max(0.25, Math.min(CONFIG.WAVE_DURATION / Math.max(total, 1), 2.5));
+  return Math.max(0.25, Math.min(getWaveDuration() / Math.max(total, 1), 2.5));
 }
 
 function spawnEnemy() {
@@ -662,7 +688,7 @@ function getStatsHTML() {
   const p = game.player;
   return `<div style="font-size:9px;color:#aaa;line-height:1.6;text-align:left;margin:8px 0;padding:8px;background:rgba(0,0,0,0.4);border:1px solid #333;border-radius:4px">
     <div style="color:#f1c40f;margin-bottom:4px;font-size:10px">━━ 玩家属性 ━━</div>
-    <div>❤️ HP: ${Math.ceil(p.hp)}/${p.maxHp} &nbsp;|&nbsp; 🛡️ 护甲: ${p.armor}</div>
+    <div>❤️ HP: ${Math.ceil(p.hp)}/${p.maxHp} &nbsp;|&nbsp; 🛡️ 护甲: ${Math.max(0, p.armor)}</div>
     <div>⚔️ 伤害: ${(p.dmgMult * 100).toFixed(0)}% &nbsp;|&nbsp; ⏩ 攻速: ${(p.aspdMult * 100).toFixed(0)}%</div>
     <div>👟 移速: ${(p.spdMult * 100).toFixed(0)}% &nbsp;|&nbsp; 🎯 射程: ${(p.rngMult * 100).toFixed(0)}%</div>
     <div>💉 生命偷取: ${p.lifesteal} &nbsp;|&nbsp; 💨 闪避: ${(p.passives.dodge * 100).toFixed(0)}%</div>
@@ -675,48 +701,53 @@ function getStatsHTML() {
 
 function combineUI() {
   const p = game.player;
-  // Group weapons by tier
+  // Group weapons by (tier, weaponId)
   const groups = {};
   for (const w of p.weapons) {
     const t = w.tier || 0;
-    if (!groups[t]) groups[t] = [];
-    groups[t].push(w);
+    const key = t + '_' + w.id;
+    if (!groups[key]) groups[key] = { tier: t, id: w.id, count: 0 };
+    groups[key].count++;
   }
+  const need = gameSettings.combineCount || 3;
   let html = '<div style="font-size:9px;color:#aaa;margin-top:6px;text-align:left">';
-  html += '<div style="color:#9b59b6;font-size:10px;margin-bottom:4px">━━ 武器合成 ━━</div>';
+  html += '<div style="color:#9b59b6;font-size:10px;margin-bottom:4px">━━ 武器合成 (' + need + '合1) ━━</div>';
   let hasCombinable = false;
-  for (let t = 0; t < 4; t++) {
-    const list = groups[t] || [];
-    if (list.length < 3) continue;
+  for (const key of Object.keys(groups).sort()) {
+    const g = groups[key];
+    if (g.count < need) continue;
+    const def = WEAPON_DEFS[g.id];
+    if (!def) continue;
+    if (g.tier >= 4) continue; // 传说不可再合成
     hasCombinable = true;
-    const tierData = TIERS[t];
-    const nextTier = TIERS[t + 1];
-    html += `<div style="margin-bottom:4px;display:flex;align-items:center;gap:6px">
-      <span style="color:${tierData.color}">${list.length}x ${tierData.name}</span>
+    const tierData = TIERS[g.tier];
+    const nextTier = TIERS[g.tier + 1];
+    html += `<div style="margin-bottom:4px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+      <span>${def.icon}</span>
+      <span style="color:${tierData.color}">${g.count}x ${def.name}[${tierData.name}]</span>
       <span style="color:#666">→</span>
-      <span style="color:${nextTier.color}">1x ${nextTier.name}</span>
-      <button onclick="combineWeapons(${t})" style="padding:2px 8px;font-size:9px;background:#8e44ad;color:#fff;border:none;cursor:pointer;font-family:'Courier New',monospace">合成</button>
+      <span style="color:${nextTier.color}">1x ${def.name}[${nextTier.name}]</span>
+      <button onclick="combineWeapons(${g.tier},'${g.id}')" style="padding:2px 8px;font-size:9px;background:#8e44ad;color:#fff;border:none;cursor:pointer;font-family:'Courier New',monospace">合成</button>
     </div>`;
   }
   if (!hasCombinable) {
-    html += '<div style="color:#555;font-size:8px">需要3把同品质武器才能合成</div>';
+    html += '<div style="color:#555;font-size:8px">需要' + need + '把同类型同品质武器才能合成</div>';
   }
   html += '</div>';
   return html;
 }
 
-function combineWeapons(tier) {
+function combineWeapons(tier, weaponId) {
   const p = game.player;
-  const sameTier = p.weapons.filter(w => (w.tier || 0) === tier);
-  if (sameTier.length < 3) return;
-  // Pick 3 to consume
-  const consumed = sameTier.slice(0, 3);
-  const newId = consumed[Math.floor(Math.random() * 3)].id;
+  const need = gameSettings.combineCount || 3;
+  const same = p.weapons.filter(w => (w.tier || 0) === tier && w.id === weaponId);
+  if (same.length < need) return;
+  const consumed = same.slice(0, need);
   for (const w of consumed) {
     const idx = p.weapons.indexOf(w);
     if (idx !== -1) p.weapons.splice(idx, 1);
   }
-  p.weapons.push({ id: newId, cd: 0, tier: tier + 1 });
+  p.weapons.push({ id: weaponId, cd: 0, tier: tier + 1 });
   playSound('level_up');
   renderShop();
 }
@@ -728,15 +759,25 @@ function showShop() {
   document.getElementById('overlayTitle').style.color = '#f39c12';
   document.getElementById('overlaySub').textContent = `波次 ${game.wave} 结束`;
   document.getElementById('restartBtn').style.display = 'none';
-  
-  // Generate shop items
-  const available = [...SHOP_ITEMS];
-  // Shuffle
-  for (let i = available.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [available[i], available[j]] = [available[j], available[i]];
+
+  // Generate mixed pool: shop items + weapons with wave-based tier
+  const pool = [];
+  for (const item of SHOP_ITEMS) {
+    pool.push({ type: 'item', id: item.id, name: item.icon + ' ' + item.name, icon: item.icon, cost: item.cost, desc: item.desc, _item: item });
   }
-  game.shopItems = available.slice(0, 4);
+  for (const [wid, def] of Object.entries(WEAPON_DEFS)) {
+    if (wid === 'stick') continue;
+    const tier = getWeaponShopTier(game.wave);
+    const tierData = TIERS[tier];
+    const cost = Math.floor(def.cost * TIER_COST_MULT[tier]);
+    pool.push({ type: 'weapon', id: 'w_' + wid, name: def.icon + ' ' + def.name, icon: def.icon, cost, desc: tierData.name + ' · ' + def.desc, weaponId: wid, tier, tierColor: tierData.color });
+  }
+  // Shuffle
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  game.shopItems = pool.slice(0, 4);
   game.shopRerolls = 0;
 
   renderShop();
@@ -747,64 +788,85 @@ function renderShop() {
   const p = game.player;
   let html = `<div id="material-count">材料: ${game.materials}</div>`;
   html += '<div class="shop-grid">';
-  
-  for (const item of game.shopItems) {
-    const canAfford = game.materials >= item.cost;
-    html += `<div class="shop-item${!canAfford ? ' disabled' : ''}" onclick="buyShopItem('${item.id}')">`;
-    html += `<div class="name">${item.icon} ${item.name}</div>`;
-    html += `<div class="cost">💰 ${item.cost}</div>`;
-    html += `<div class="desc">${item.desc}</div>`;
+
+  for (const entry of game.shopItems) {
+    let disabled, onclick;
+    if (entry.type === 'item') {
+      disabled = game.materials < entry.cost;
+      onclick = `buyShopItem('${entry.id}')`;
+    } else {
+      const owned = p.weapons.some(w => w.id === entry.weaponId);
+      const maxWeapons = p.weapons.length >= CONFIG.MAX_WEAPONS;
+      disabled = game.materials < entry.cost || owned || maxWeapons;
+      onclick = `buyWeapon('${entry.weaponId}',${entry.tier},${entry.cost})`;
+    }
+    html += `<div class="shop-item${disabled ? ' disabled' : ''}" onclick="${onclick}">`;
+    html += `<div class="name">${entry.name}</div>`;
+    html += `<div class="cost">💰 ${entry.cost}</div>`;
+    html += `<div class="desc">${entry.desc}</div>`;
     html += '</div>';
   }
-  
-  // Show weapon purchases
-  for (const [wid, def] of Object.entries(WEAPON_DEFS)) {
-    if (wid === 'stick') continue;
-    const owned = p.weapons.some(w => w.id === wid);
-    if (owned) continue;
-    if (p.weapons.length >= CONFIG.MAX_WEAPONS) continue;
-    const canAfford = game.materials >= def.cost;
-    html += `<div class="shop-item${!canAfford ? ' disabled' : ''}" onclick="buyWeapon('${wid}')">`;
-    html += `<div class="name">${def.icon} ${def.name}</div>`;
-    html += `<div class="cost">💰 ${def.cost}</div>`;
-    html += `<div class="desc">${def.desc}</div>`;
-    html += '</div>';
-  }
-  
+
   html += '</div>';
 
   // Weapon combine section
   html += combineUI();
+
+  // Sell weapon section
+  html += '<div style="font-size:9px;color:#aaa;margin-top:6px;text-align:left">';
+  html += '<div style="color:#e74c3c;font-size:10px;margin-bottom:4px">━━ 出售武器 ━━</div>';
+  html += '<div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:center">';
+  for (let i = 0; i < p.weapons.length; i++) {
+    const w = p.weapons[i];
+    const def = WEAPON_DEFS[w.id];
+    const tierData = TIERS[w.tier || 0];
+    const sellPrice = Math.floor(def.cost * TIER_COST_MULT[w.tier || 0]);
+    const canSell = p.weapons.length > 1;
+    html += `<div style="border:1px solid ${tierData.color};border-radius:3px;padding:4px 6px;font-size:8px;text-align:center;${canSell ? 'cursor:pointer' : 'opacity:0.5'}" onclick="${canSell ? `sellWeapon(${i})` : ''}">`;
+    html += `<div>${def.icon}</div>`;
+    html += `<div style="color:${tierData.color}">${def.name}</div>`;
+    html += `<div style="color:#f1c40f;font-size:7px">💰 ${sellPrice}</div>`;
+    html += '</div>';
+  }
+  html += '</div></div>';
 
   html += getStatsHTML();
   html += '<div class="shop-controls">';
   const rerollCost = 3 + game.shopRerolls * 2;
   html += `<button class="btn-reroll" onclick="rerollShop()">刷新 (💰 ${rerollCost})</button>`;
   html += `<button class="btn-continue" onclick="continueGame()">继续 →</button>`;
+
+  // Show weapon stock warning when full
+  if (p.weapons.length >= CONFIG.MAX_WEAPONS) {
+    html += '<div style="font-size:8px;color:#888;margin-top:4px">武器栏已满</div>';
+  }
+
   html += '</div>';
-  
+
   content.innerHTML = html;
 }
 
 function buyShopItem(id) {
-  const idx = game.shopItems.findIndex(i => i.id === id);
+  const idx = game.shopItems.findIndex(i => i.id === id && i.type === 'item');
   if (idx === -1) return;
-  const item = game.shopItems[idx];
-  if (game.materials < item.cost) return;
-  game.materials -= item.cost;
-  item.effect(game.player);
+  const entry = game.shopItems[idx];
+  if (game.materials < entry.cost) return;
+  game.materials -= entry.cost;
+  entry._item.effect(game.player);
   game.shopItems.splice(idx, 1);
   playSound('buy');
   renderShop();
 }
 
-function buyWeapon(id) {
+function buyWeapon(id, tier, cost) {
   const p = game.player;
   if (p.weapons.length >= CONFIG.MAX_WEAPONS) return;
-  const def = WEAPON_DEFS[id];
-  if (game.materials < def.cost) return;
-  game.materials -= def.cost;
-  p.weapons.push({ id, cd: 0, tier: 0 });
+  if (game.materials < cost) return;
+  game.materials -= cost;
+  p.weapons.push({ id, cd: 0, tier });
+  // 从商店格子移除该武器
+  const idx = game.shopItems.findIndex(e => e.type === 'weapon' && e.weaponId === id);
+  if (idx !== -1) game.shopItems.splice(idx, 1);
   playSound('buy');
   renderShop();
 }
@@ -814,12 +876,36 @@ function rerollShop() {
   if (game.materials < cost) return;
   game.materials -= cost;
   game.shopRerolls++;
-  const available = [...SHOP_ITEMS];
-  for (let i = available.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [available[i], available[j]] = [available[j], available[i]];
+  const pool = [];
+  for (const item of SHOP_ITEMS) {
+    pool.push({ type: 'item', id: item.id, name: item.icon + ' ' + item.name, icon: item.icon, cost: item.cost, desc: item.desc, _item: item });
   }
-  game.shopItems = available.slice(0, 4);
+  for (const [wid, def] of Object.entries(WEAPON_DEFS)) {
+    if (wid === 'stick') continue;
+    const tier = getWeaponShopTier(game.wave);
+    const tierData = TIERS[tier];
+    const wcost = Math.floor(def.cost * TIER_COST_MULT[tier]);
+    pool.push({ type: 'weapon', id: 'w_' + wid, name: def.icon + ' ' + def.name, icon: def.icon, cost: wcost, desc: tierData.name + ' · ' + def.desc, weaponId: wid, tier, tierColor: tierData.color });
+  }
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  game.shopItems = pool.slice(0, 4);
+  renderShop();
+}
+
+function sellWeapon(index) {
+  const p = game.player;
+  if (p.weapons.length <= 1) return;
+  if (index < 0 || index >= p.weapons.length) return;
+  const w = p.weapons[index];
+  const def = WEAPON_DEFS[w.id];
+  if (!def) return;
+  const sellPrice = Math.floor(def.cost * TIER_COST_MULT[w.tier || 0]);
+  game.materials += sellPrice;
+  p.weapons.splice(index, 1);
+  playSound('buy');
   renderShop();
 }
 
@@ -883,10 +969,10 @@ function applyUpgrade(id) {
   game.level++;
   game.xp -= game.xpNext;
   game.xpNext = Math.floor(game.xpNext * 1.22) + 2;
-  
+
   document.getElementById('overlay').classList.remove('show');
-  game.wave++;
-  startWave();
+  // 恢复游戏，倒计时继续
+  game.state = 'playing';
 }
 
 // ======================== GAME UPDATE ========================
@@ -1222,9 +1308,9 @@ function updateGame(dt) {
     if (dn.life <= 0) game.damageNumbers.splice(i, 1);
   }
   
-  // Wave timer (30-second waves)
+  // Wave timer
   game.waveTimer += dt;
-  if (game.waveTimer >= CONFIG.WAVE_DURATION) {
+  if (game.waveTimer >= getWaveDuration()) {
     endWave();
     return;
   }
@@ -1440,23 +1526,25 @@ function render() {
 }
 
 function updateHUD() {
+  if (!game.player) return;
   const p = game.player;
   document.getElementById('hpFill').style.width = `${(p.hp / p.maxHp) * 100}%`;
   document.getElementById('hpText').textContent = `${Math.ceil(p.hp)}/${p.maxHp}`;
-  document.getElementById('shieldDisplay').textContent = `🛡️ ${p.armor}`;
+  document.getElementById('shieldDisplay').textContent = `🛡️ ${Math.max(0, p.armor)}`;
   document.getElementById('waveText').textContent = `波次: ${game.wave}/${CONFIG.TOTAL_WAVES}`;
   document.getElementById('levelText').textContent = `等级 ${game.level}`;
   document.getElementById('materialsText').textContent = `材料: ${game.materials}`;
   document.getElementById('xpFill').style.width = `${Math.min(100, (game.xp / game.xpNext) * 100)}%`;
   
   // Stats panel (右上角)
-  const waveRemaining = game.state === 'playing' ? Math.ceil(Math.max(0, CONFIG.WAVE_DURATION - game.waveTimer)) : 0;
+  const waveRemaining = game.state === 'playing' ? Math.ceil(Math.max(0, getWaveDuration() - game.waveTimer)) : 0;
   document.getElementById('statsPanel').innerHTML =
-    `⏱ ${waveRemaining}s &nbsp;⚔️ ${(p.dmgMult * 100).toFixed(0)}% ⏩ ${(p.aspdMult * 100).toFixed(0)}% 🛡️ ${p.armor}`;
+    `⏱ ${waveRemaining}s &nbsp;⚔️ ${(p.dmgMult * 100).toFixed(0)}% ⏩ ${(p.aspdMult * 100).toFixed(0)}% 🛡️ ${Math.max(0, p.armor)}`;
   
   // Weapon bar
   const wbar = document.getElementById('weapon-bar');
   wbar.innerHTML = '';
+  const tooltip = document.getElementById('weapon-tooltip');
   for (let i = 0; i < CONFIG.MAX_WEAPONS; i++) {
     const slot = document.createElement('div');
     slot.className = 'weapon-slot';
@@ -1464,8 +1552,12 @@ function updateHUD() {
       const w = p.weapons[i];
       const def = WEAPON_DEFS[w.id];
       const tierData = TIERS[w.tier || 0];
+      const tierMult = tierData.mult;
       slot.style.borderColor = tierData.color;
       slot.innerHTML = `<div class="w-icon">${def.icon}</div><div>${def.name}</div><div style="font-size:6px;color:${tierData.color}">${tierData.name}</div>`;
+      const tooltipText = `${def.icon} ${def.name}\n⚔️ 伤害:${Math.ceil(def.damage * tierMult)} (${def.damage}×${tierMult.toFixed(1)})\n⏱ CD:${def.cooldown.toFixed(2)}s | 📡 范围:${def.range || 0} | ${def.type === 'ranged' ? '🏹远程' : def.type === 'melee' ? '⚔️近战' : '💣地雷'}`;
+      slot.onmouseenter = () => { tooltip.textContent = tooltipText; tooltip.style.display = 'block'; };
+      slot.onmouseleave = () => { tooltip.style.display = 'none'; };
     } else {
       slot.innerHTML = '<div style="color:#333">-</div>';
     }
@@ -1742,6 +1834,21 @@ function showCharacterSelect() {
     html += `<div style="font-size:7px;color:#888">${d.desc}</div></div>`;
   }
   html += '</div></div>';
+  // Settings section
+  html += '<div style="margin-bottom:10px;border-top:1px solid #333;padding-top:8px">';
+  html += '<div style="font-size:10px;color:#aaa;margin-bottom:4px">游戏设置:</div>';
+  html += '<div style="display:flex;gap:8px;justify-content:center;align-items:center;font-size:11px">';
+  html += '<span style="color:#888">每关时间:</span>';
+  html += '<button onclick="adjustSetting(\'waveDuration\',-5)" style="padding:2px 10px;font-size:12px;background:#555;color:#fff;border:none;cursor:pointer;font-family:\'Courier New\',monospace">−</button>';
+  html += '<span style="color:#f1c40f;min-width:40px;display:inline-block;text-align:center">' + gameSettings.waveDuration + 's</span>';
+  html += '<button onclick="adjustSetting(\'waveDuration\',5)" style="padding:2px 10px;font-size:12px;background:#555;color:#fff;border:none;cursor:pointer;font-family:\'Courier New\',monospace">+</button>';
+  html += '</div>';
+  html += '<div style="display:flex;gap:8px;justify-content:center;align-items:center;font-size:11px;margin-top:4px">';
+  html += '<span style="color:#888">合成需求:</span>';
+  const combineLabel = gameSettings.combineCount === 2 ? '2把' : '3把';
+  html += '<span style="color:#f1c40f;min-width:30px;display:inline-block;text-align:center">' + combineLabel + '</span>';
+  html += '<button onclick="adjustSetting(\'combineCount\',0)" style="padding:2px 10px;font-size:10px;background:#555;color:#fff;border:none;cursor:pointer;font-family:\'Courier New\',monospace">切换</button>';
+  html += '</div></div>';
   html += '<div style="font-size:9px;color:#888;margin-bottom:6px">选择角色</div>';
   html += "<div class=\"char-grid\">";
   for (const c of CHARACTERS) {
@@ -1770,7 +1877,7 @@ function showCharacterSelect() {
     html += "</div>";
   }
   html += "</div>";
-  html += "<div style=\"font-size:9px;color:#666;margin-top:8px\">WASD移动 · 自动攻击 · 每关30秒 · 20波挑战</div>";
+  html += '<div style="font-size:9px;color:#666;margin-top:8px">WASD移动 · 自动攻击 · 每关' + getWaveDuration() + '秒 · 20波挑战</div>';
   html += "<div style=\"margin-top:8px\"><button onclick=\"showRecords()\" style=\"padding:4px 16px;font-size:10px;background:#555;color:#fff;border:none;cursor:pointer;font-family:'Courier New',monospace\">📊 历史记录</button></div>";
   document.getElementById("overlayContent").innerHTML = html;
 }
@@ -1843,8 +1950,10 @@ function gameLoop(time) {
   
   if (game.state === 'playing') {
     updateGame(dt);
+  } else {
+    updateHUD();
   }
-  
+
   render();
   requestAnimationFrame(gameLoop);
 }
