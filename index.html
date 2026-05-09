@@ -18,6 +18,10 @@ canvas{display:block;background:#1a1a2e;border:2px solid #333}
 .wave-text{font-size:11px;color:#f39c12;text-shadow:1px 1px 0 #000}
 .materials-text{font-size:11px;color:#f1c40f;text-shadow:1px 1px 0 #000}
 .level-text{font-size:10px;color:#2ecc71;text-shadow:1px 1px 0 #000}
+.xp-bar{width:120px;height:5px;background:#222;border:1px solid #444;position:relative;margin-top:2px}
+.xp-fill{height:100%;background:#2ecc71;transition:width 0.2s}
+.shield-display{font-size:10px;color:#3498db;text-shadow:1px 1px 0 #000;margin-left:4px;display:inline-flex;align-items:center;gap:2px}
+.hp-row{display:flex;align-items:center;gap:4px}
 #weapon-bar{position:absolute;bottom:8px;left:50%;transform:translateX(-50%);display:flex;gap:4px}
 .weapon-slot{width:44px;height:44px;background:rgba(0,0,0,0.7);border:1px solid #555;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:7px;color:#aaa}
 .weapon-slot.active{border-color:#f39c12}
@@ -35,8 +39,7 @@ canvas{display:block;background:#1a1a2e;border:2px solid #333}
 .shop-item .name{font-size:10px;color:#fff}
 .shop-item .cost{font-size:9px;color:#f1c40f}
 .shop-item .desc{font-size:7px;color:#888;margin-top:4px}
-.shop-item.owned{border-color:#2ecc71;opacity:0.5}
-.shop-item.owned::after{content:"✓";color:#2ecc71;font-size:12px}
+.shop-item.disabled{border-color:#444;opacity:0.4;cursor:not-allowed}
 .upgrade-grid{display:flex;gap:12px;margin:12px 0}
 .upgrade-card{background:rgba(0,0,0,0.6);border:1px solid #555;padding:12px;text-align:center;cursor:pointer;pointer-events:auto;width:140px}
 .upgrade-card:hover{border-color:#2ecc71;background:rgba(46,204,113,0.15)}
@@ -69,8 +72,9 @@ canvas{display:block;background:#1a1a2e;border:2px solid #333}
 <div id="hud">
 <div class="hud-left">
 <div class="wave-text" id="waveText">波次: 1</div>
-<div class="hp-bar"><div class="hp-fill" id="hpFill" style="width:100%"></div><div class="hp-text"><span id="hpText">10/10</span></div></div>
+<div class="hp-row"><div class="hp-bar"><div class="hp-fill" id="hpFill" style="width:100%"></div><div class="hp-text"><span id="hpText">10/10</span></div></div><div class="shield-display" id="shieldDisplay">🛡️ 0</div></div>
 <div class="level-text" id="levelText">等级 1</div>
+<div class="xp-bar"><div class="xp-fill" id="xpFill" style="width:0%"></div></div>
 </div>
 <div class="hud-right">
 <div class="materials-text" id="materialsText">材料: 0</div>
@@ -234,6 +238,7 @@ const game = {
   time: 0,
   waveEnemiesSpawned: 0,
   waveEnemiesTotal: 0,
+  shopRerolls: 0,
   waveTimer: 0,
   spawnTimer: 0,
   shopItems: [],
@@ -245,7 +250,7 @@ const game = {
   particles: [],
   damageNumbers: [],
   shakeTimer: 0,
-  freezeFrames: 0, character: null, materialBonus: 0, bossActive: false, bossSpawned: false, bossDefeated: false,
+  freezeFrames: 0, character: null, materialBonus: 0, difficulty: 'normal', enemyMult: 1.0, bossActive: false, bossSpawned: false, bossDefeated: false,
 };
 
 const keys = { w: false, a: false, s: false, d: false };
@@ -257,18 +262,28 @@ const WEAPON_DEFS = {
   },
   pistol: {
     name: '手枪', icon: '🔫', type: 'ranged', damage: 2, cooldown: 0.25, range: 280,
-    speed: 500, aoe: 0, knockback: 80, color: '#888', cost: 15, desc: '快速射击'
+    speed: 500, aoe: 0, knockback: 80, color: '#888', cost: 15, desc: '快速射击',
+    sound: 'pistol'
   },
   rocket: {
     name: '火箭筒', icon: '💥', type: 'ranged', damage: 8, cooldown: 1.8, range: 320,
-    speed: 300, aoe: 60, knockback: 300, color: '#e74c3c', cost: 35, desc: '范围爆炸'
+    speed: 300, aoe: 60, knockback: 300, color: '#e74c3c', cost: 35, desc: '范围爆炸',
+    sound: 'rocket'
   },
-  flamethrower: { name: "火焰喷射器", icon: "🔥", type: "ranged", damage: 1, cooldown: 0.05, range: 120, speed: 300, aoe: 0, knockback: 15, color: "#e74c3c", cost: 30, desc: "持续喷射火焰" },
-  smg: { name: "冲锋枪", icon: "🔫", type: "ranged", damage: 1, cooldown: 0.08, range: 240, speed: 600, aoe: 0, knockback: 15, color: "#bbb", cost: 25, desc: "高速散射", spread: 0.15 },
-  laser: { name: "激光枪", icon: "🔦", type: "ranged", damage: 5, cooldown: 0.6, range: 400, speed: 800, aoe: 0, knockback: 50, color: "#2ecc71", cost: 35, desc: "穿透敌人", penetrate: true },
+  flamethrower: { name: "火焰喷射器", icon: "🔥", type: "ranged", damage: 1, cooldown: 0.05, range: 120, speed: 300, aoe: 0, knockback: 15, color: "#e74c3c", cost: 30, desc: "持续喷射火焰", sound: 'flamethrower' },
+  smg: { name: "冲锋枪", icon: "🔫", type: "ranged", damage: 1, cooldown: 0.08, range: 240, speed: 600, aoe: 0, knockback: 15, color: "#bbb", cost: 25, desc: "高速散射", spread: 0.15, sound: 'smg' },
+  laser: { name: "激光枪", icon: "🔦", type: "ranged", damage: 5, cooldown: 0.6, range: 400, speed: 800, aoe: 0, knockback: 50, color: "#2ecc71", cost: 35, desc: "穿透敌人", penetrate: true, sound: 'laser' },
   axe: { name: "回旋斧", icon: "🪓", type: "melee", damage: 6, cooldown: 1.0, range: 70, aoe: 360, knockback: 200, color: "#888", cost: 20, desc: "大范围回旋斩" },
   mine: { name: "地雷", icon: "💣", type: "mine", damage: 12, cooldown: 3.0, range: 0, aoe: 80, knockback: 400, color: "#555", cost: 15, desc: "放置地雷" }
 };
+
+const TIERS = [
+  { name: '普通', color: '#aaaaaa', mult: 1.0 },
+  { name: '优秀', color: '#2ecc71', mult: 1.6 },
+  { name: '精良', color: '#3498db', mult: 2.4 },
+  { name: '史诗', color: '#9b59b6', mult: 3.5 },
+  { name: '传说', color: '#e74c3c', mult: 5.0 },
+];
 
 const SHOP_ITEMS = [
   { id: 'hp', name: '生命恢复', desc: '恢复 3 HP', icon: '❤️', cost: 5, effect: (p) => { p.hp = Math.min(p.hp + 3, p.maxHp); } },
@@ -305,6 +320,13 @@ const CHARACTERS = [
   { id: 'doctor',    name: '医生',   icon: '💉', desc: '治疗专家', stats: { lifesteal: 3, dmgMult: 0.8 }, trait: '生命偷取+3，伤害-20%', weapons: ['pistol'] },
 ];
 
+const DIFFICULTIES = {
+  easy:   { label: '简单',   desc: '敌人减少，属性降低', enemyMult: 0.6, enemyBoost: 0 },
+  normal: { label: '普通',   desc: '标准体验',           enemyMult: 1.0, enemyBoost: 0 },
+  hard:   { label: '困难',   desc: '敌人增多，属性提升', enemyMult: 1.5, enemyBoost: 2 },
+  insane: { label: '地狱',   desc: '敌人大军，大幅强化', enemyMult: 2.2, enemyBoost: 4 },
+};
+
 // ======================== ENTITY CREATION ========================
 function createPlayer(charId) {
   const base = {
@@ -318,7 +340,7 @@ function createPlayer(charId) {
     aspdMult: 1.0,
     rngMult: 1.0,
     lifesteal: 0,
-    weapons: [{ id: 'stick', cd: 0 }],
+    weapons: [{ id: 'stick', cd: 0, tier: 0 }],
     invincible: 0,
     angle: 0,
     color: null,
@@ -341,7 +363,7 @@ function createPlayer(charId) {
       if (ch.stats.aspdMult) base.aspdMult = ch.stats.aspdMult;
       if (ch.stats.lifesteal !== undefined) base.lifesteal = ch.stats.lifesteal;
       if (ch.weapons) {
-        base.weapons = ch.weapons.map(id => ({ id, cd: 0 }));
+        base.weapons = ch.weapons.map(id => ({ id, cd: 0, tier: 0 }));
       }
       if (ch.materialBonus) game.materialBonus = ch.materialBonus;
     }
@@ -362,14 +384,16 @@ function createEnemy(type, x, y) {
   };
   const def = defs[type];
   if (!def) return defs.basic ? createEnemy('basic', x, y) : null;
+  const diff = DIFFICULTIES[game.difficulty] || DIFFICULTIES.normal;
+  const boost = diff.enemyBoost || 0;
   const enemy = {
     x, y, type,
-    hp: def.hp + Math.floor(game.wave * 0.5),
-    maxHp: def.hp + Math.floor(game.wave * 0.5),
-    speed: def.speed + game.wave * 1.5,
-    damage: def.damage + Math.floor(game.wave * 0.3),
+    hp: def.hp + Math.floor(game.wave * 1.2) + boost,
+    maxHp: def.hp + Math.floor(game.wave * 1.2) + boost,
+    speed: def.speed + game.wave * 2 + boost * 3,
+    damage: def.damage + Math.floor(game.wave * 0.5) + Math.floor(boost * 0.5),
     radius: def.radius,
-    xp: def.xp,
+    xp: def.xp + Math.floor(game.wave * 0.3),
     sprite: def.sprite,
     color: def.color,
     size: def.size,
@@ -383,8 +407,8 @@ function createEnemy(type, x, y) {
   return enemy;
 }
 
-function createProjectile(x, y, angle, weapon, player) {
-  const dmg = weapon.damage * player.dmgMult;
+function createProjectile(x, y, angle, weapon, player, tierMult) {
+  const dmg = weapon.damage * player.dmgMult * (tierMult || 1);
   return {
     x, y,
     vx: Math.cos(angle) * weapon.speed,
@@ -402,7 +426,7 @@ function createProjectile(x, y, angle, weapon, player) {
 function createPickup(x, y, amount) {
   return {
     x, y, amount,
-    radius: 5,
+    radius: 3,
     life: 8.0,
     bob: Math.random() * Math.PI * 2,
     magnet: false,
@@ -441,16 +465,17 @@ function createDamageNumber(x, y, amount, color) {
 function fireWeapon(player, weapon, enemy) {
   const def = WEAPON_DEFS[weapon.id];
   if (!def) return 0;
+  const tier = TIERS[weapon.tier || 0];
   const dx = enemy.x - player.x;
   const dy = enemy.y - player.y;
   const angle = Math.atan2(dy, dx);
   const range = (def.range || 60) * player.rngMult;
   const dist = Math.sqrt(dx * dx + dy * dy);
-  const cd = def.cooldown / player.aspdMult;
+  const cd = def.cooldown / player.aspdMult / (1 + (weapon.tier || 0) * 0.12);
 
   if (def.type === 'melee') {
     if (dist <= range) {
-      const dmg = def.damage * player.dmgMult;
+      const dmg = def.damage * player.dmgMult * tier.mult;
       const knockX = Math.cos(angle) * def.knockback;
       const knockY = Math.sin(angle) * def.knockback;
       enemy.hp -= dmg;
@@ -462,20 +487,23 @@ function fireWeapon(player, weapon, enemy) {
         player.hp = Math.min(player.hp + player.lifesteal, player.maxHp);
       }
       createParticle(enemy.x, enemy.y, '#fff', 3);
+      playSound('melee_hit');
     }
   } else if (def.type === 'mine') {
-    const mine = createProjectile(player.x, player.y, angle, def, player);
+    const mine = createProjectile(player.x, player.y, angle, def, player, tier.mult);
     mine.vx = 0; mine.vy = 0;
     mine.isMine = true;
     mine.radius = 6;
     mine.life = 15.0;
     game.projectiles.push(mine);
+    playSound('mine_place');
   } else {
-    const proj = createProjectile(player.x, player.y, angle, def, player);
+    const proj = createProjectile(player.x, player.y, angle, def, player, tier.mult);
     game.projectiles.push(proj);
+    if (def.sound) playSound(def.sound);
     if (player.passives.bulletSplit > 0 && Math.random() < player.passives.bulletSplit) {
       const splitAngle = angle + (Math.random() - 0.5) * 0.8;
-      const splitProj = createProjectile(player.x, player.y, splitAngle, def, player);
+      const splitProj = createProjectile(player.x, player.y, splitAngle, def, player, tier.mult);
       game.projectiles.push(splitProj);
     }
   }
@@ -509,13 +537,14 @@ function fireWeapon(player, weapon, enemy) {
 
 // ======================== WAVE SYSTEM ========================
 function getWaveEnemies(wave) {
-  const basic = 3 + wave * 2;
-  const fast = wave >= 2 ? Math.floor((wave - 1) * 1.2) : 0;
-  const heavy = wave >= 3 ? Math.floor((wave - 2) * 0.8) : 0;
-  const ranged = wave >= 4 ? Math.floor((wave - 2) * 0.7) : 0;
-  const exploder = wave >= 6 ? Math.floor((wave - 4) * 0.5) : 0;
-  const summoner = wave >= 8 ? Math.floor((wave - 6) * 0.4) : 0;
-  const elite = wave >= 10 ? Math.floor((wave - 8) * 0.3) : 0;
+  const mult = game.enemyMult || 1;
+  const basic = Math.floor((5 + wave * 3) * mult);
+  const fast = wave >= 2 ? Math.floor((wave - 1) * 2.5 * mult) : 0;
+  const heavy = wave >= 3 ? Math.floor((wave - 2) * 1.5 * mult) : 0;
+  const ranged = wave >= 4 ? Math.floor((wave - 2) * 1.2 * mult) : 0;
+  const exploder = wave >= 6 ? Math.floor((wave - 4) * 1.0 * mult) : 0;
+  const summoner = wave >= 8 ? Math.floor((wave - 6) * 0.8 * mult) : 0;
+  const elite = wave >= 10 ? Math.floor((wave - 8) * 0.6 * mult) : 0;
   return { basic, fast, heavy, ranged, exploder, summoner, elite };
 }
 
@@ -558,6 +587,7 @@ function spawnEnemy() {
       x = Math.max(0, Math.min(CONFIG.ARENA_W, x));
       y = Math.max(0, Math.min(CONFIG.ARENA_H, y));
       game.enemies.push(createEnemy('boss', x, y));
+      playSound('boss_spawn');
       game.waveEnemiesSpawned++;
     }
     return;
@@ -584,6 +614,7 @@ function spawnEnemy() {
 
 function startWave() {
   game.state = 'playing';
+  playSound('wave_start');
   const counts = getWaveEnemies(game.wave);
   game.bossActive = (game.wave % 5 === 0);
   game.bossSpawned = false;
@@ -603,6 +634,7 @@ function endWave() {
   game.materials += 3 + game.wave * 2;
   if (game.wave >= CONFIG.TOTAL_WAVES) {
     game.state = 'won';
+    saveRecord('victory');
     showOverlay('victory');
     return;
   }
@@ -610,6 +642,69 @@ function endWave() {
 }
 
 // ======================== SHOP & UPGRADE ========================
+function getStatsHTML() {
+  const p = game.player;
+  return `<div style="font-size:9px;color:#aaa;line-height:1.6;text-align:left;margin:8px 0;padding:8px;background:rgba(0,0,0,0.4);border:1px solid #333;border-radius:4px">
+    <div style="color:#f1c40f;margin-bottom:4px;font-size:10px">━━ 玩家属性 ━━</div>
+    <div>❤️ HP: ${Math.ceil(p.hp)}/${p.maxHp} &nbsp;|&nbsp; 🛡️ 护甲: ${p.armor}</div>
+    <div>⚔️ 伤害: ${(p.dmgMult * 100).toFixed(0)}% &nbsp;|&nbsp; ⏩ 攻速: ${(p.aspdMult * 100).toFixed(0)}%</div>
+    <div>👟 移速: ${(p.spdMult * 100).toFixed(0)}% &nbsp;|&nbsp; 🎯 射程: ${(p.rngMult * 100).toFixed(0)}%</div>
+    <div>💉 生命偷取: ${p.lifesteal} &nbsp;|&nbsp; 💨 闪避: ${(p.passives.dodge * 100).toFixed(0)}%</div>
+    <div>🔫 武器: ${p.weapons.map(w => { const d = WEAPON_DEFS[w.id]; const t = TIERS[w.tier || 0]; return d ? d.icon + d.name + `<span style="color:${t.color}">[${t.name}]</span>` : ''; }).join(' ')}</div>
+    ${p.passives.explodeOnKill ? '<div>💥 击杀爆炸</div>' : ''}
+    ${p.passives.thorns > 0 ? `<div>🌵 反伤: ${p.passives.thorns}</div>` : ''}
+    ${p.passives.bulletSplit > 0 ? `<div>🔀 分裂: ${(p.passives.bulletSplit * 100).toFixed(0)}%</div>` : ''}
+  </div>`;
+}
+
+function combineUI() {
+  const p = game.player;
+  // Group weapons by tier
+  const groups = {};
+  for (const w of p.weapons) {
+    const t = w.tier || 0;
+    if (!groups[t]) groups[t] = [];
+    groups[t].push(w);
+  }
+  let html = '<div style="font-size:9px;color:#aaa;margin-top:6px;text-align:left">';
+  html += '<div style="color:#9b59b6;font-size:10px;margin-bottom:4px">━━ 武器合成 ━━</div>';
+  let hasCombinable = false;
+  for (let t = 0; t < 4; t++) {
+    const list = groups[t] || [];
+    if (list.length < 3) continue;
+    hasCombinable = true;
+    const tierData = TIERS[t];
+    const nextTier = TIERS[t + 1];
+    html += `<div style="margin-bottom:4px;display:flex;align-items:center;gap:6px">
+      <span style="color:${tierData.color}">${list.length}x ${tierData.name}</span>
+      <span style="color:#666">→</span>
+      <span style="color:${nextTier.color}">1x ${nextTier.name}</span>
+      <button onclick="combineWeapons(${t})" style="padding:2px 8px;font-size:9px;background:#8e44ad;color:#fff;border:none;cursor:pointer;font-family:'Courier New',monospace">合成</button>
+    </div>`;
+  }
+  if (!hasCombinable) {
+    html += '<div style="color:#555;font-size:8px">需要3把同品质武器才能合成</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function combineWeapons(tier) {
+  const p = game.player;
+  const sameTier = p.weapons.filter(w => (w.tier || 0) === tier);
+  if (sameTier.length < 3) return;
+  // Pick 3 to consume
+  const consumed = sameTier.slice(0, 3);
+  const newId = consumed[Math.floor(Math.random() * 3)].id;
+  for (const w of consumed) {
+    const idx = p.weapons.indexOf(w);
+    if (idx !== -1) p.weapons.splice(idx, 1);
+  }
+  p.weapons.push({ id: newId, cd: 0, tier: tier + 1 });
+  playSound('level_up');
+  renderShop();
+}
+
 function showShop() {
   game.state = 'shopping';
   document.getElementById('overlay').classList.add('show');
@@ -626,7 +721,8 @@ function showShop() {
     [available[i], available[j]] = [available[j], available[i]];
   }
   game.shopItems = available.slice(0, 4);
-  
+  game.shopRerolls = 0;
+
   renderShop();
 }
 
@@ -638,7 +734,7 @@ function renderShop() {
   
   for (const item of game.shopItems) {
     const canAfford = game.materials >= item.cost;
-    html += `<div class="shop-item${!canAfford ? ' owned' : ''}" onclick="buyShopItem('${item.id}')">`;
+    html += `<div class="shop-item${!canAfford ? ' disabled' : ''}" onclick="buyShopItem('${item.id}')">`;
     html += `<div class="name">${item.icon} ${item.name}</div>`;
     html += `<div class="cost">💰 ${item.cost}</div>`;
     html += `<div class="desc">${item.desc}</div>`;
@@ -652,7 +748,7 @@ function renderShop() {
     if (owned) continue;
     if (p.weapons.length >= CONFIG.MAX_WEAPONS) continue;
     const canAfford = game.materials >= def.cost;
-    html += `<div class="shop-item${!canAfford ? ' owned' : ''}" onclick="buyWeapon('${wid}')">`;
+    html += `<div class="shop-item${!canAfford ? ' disabled' : ''}" onclick="buyWeapon('${wid}')">`;
     html += `<div class="name">${def.icon} ${def.name}</div>`;
     html += `<div class="cost">💰 ${def.cost}</div>`;
     html += `<div class="desc">${def.desc}</div>`;
@@ -660,8 +756,14 @@ function renderShop() {
   }
   
   html += '</div>';
+
+  // Weapon combine section
+  html += combineUI();
+
+  html += getStatsHTML();
   html += '<div class="shop-controls">';
-  html += `<button class="btn-reroll" onclick="rerollShop()">刷新 (💰 3)</button>`;
+  const rerollCost = 3 + game.shopRerolls * 2;
+  html += `<button class="btn-reroll" onclick="rerollShop()">刷新 (💰 ${rerollCost})</button>`;
   html += `<button class="btn-continue" onclick="continueGame()">继续 →</button>`;
   html += '</div>';
   
@@ -676,6 +778,7 @@ function buyShopItem(id) {
   game.materials -= item.cost;
   item.effect(game.player);
   game.shopItems.splice(idx, 1);
+  playSound('buy');
   renderShop();
 }
 
@@ -685,13 +788,16 @@ function buyWeapon(id) {
   const def = WEAPON_DEFS[id];
   if (game.materials < def.cost) return;
   game.materials -= def.cost;
-  p.weapons.push({ id, cd: 0 });
+  p.weapons.push({ id, cd: 0, tier: 0 });
+  playSound('buy');
   renderShop();
 }
 
 function rerollShop() {
-  if (game.materials < 3) return;
-  game.materials -= 3;
+  const cost = 3 + game.shopRerolls * 2;
+  if (game.materials < cost) return;
+  game.materials -= cost;
+  game.shopRerolls++;
   const available = [...SHOP_ITEMS];
   for (let i = available.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -714,6 +820,7 @@ function continueGame() {
 
 function showLevelUp() {
   game.state = 'levelup';
+  playSound('level_up');
   document.getElementById('overlay').classList.add('show');
   document.getElementById('overlayTitle').textContent = '升级!';
   document.getElementById('overlayTitle').style.color = '#2ecc71';
@@ -741,6 +848,7 @@ function renderUpgrades() {
     html += '</div>';
   }
   html += '</div>';
+  html += getStatsHTML();
   content.innerHTML = html;
 }
 
@@ -758,7 +866,7 @@ function applyUpgrade(id) {
   }
   game.level++;
   game.xp -= game.xpNext;
-  game.xpNext = Math.floor(game.xpNext * 1.4) + 1;
+  game.xpNext = Math.floor(game.xpNext * 1.22) + 2;
   
   document.getElementById('overlay').classList.remove('show');
   game.wave++;
@@ -895,11 +1003,13 @@ function updateGame(dt) {
     // Enemy-player collision
     if (d < p.radius + e.radius) {
       if (p.invincible <= 0) {
-        const dmg = Math.max(1, e.damage - p.armor);
+        const dmg = Math.max(0, e.damage - p.armor);
         if (p.passives.dodge > 0 && Math.random() < p.passives.dodge) {
           createDamageNumber(p.x, p.y, 0, '#3498db');
+          playSound('dodge');
         } else {
           p.hp -= dmg;
+        playSound('player_hit');
         if (p.passives.thorns > 0) {
             e.hp -= p.passives.thorns;
             createDamageNumber(e.x, e.y, p.passives.thorns, '#27ae60');
@@ -933,6 +1043,7 @@ function updateGame(dt) {
       game.enemiesKilled++;
       game.xp += e.xp;
       createParticle(e.x, e.y, e.color, 6);
+      playSound('enemy_kill');
 	      if (p.passives.explodeOnKill) {
 	        for (const other of game.enemies) {
 	          if (other !== e && dist(e, other) < 60) {
@@ -951,6 +1062,7 @@ function updateGame(dt) {
         }
         createParticle(e.x, e.y, '#e67e22', 20);
         game.shakeTimer = 0.15;
+        playSound('explosion');
       }
       // Summoner death
       if (e.behavior === 'summoner') {
@@ -964,6 +1076,7 @@ function updateGame(dt) {
         game.bossDefeated = true;
         createParticle(e.x, e.y, '#8e44ad', 40);
         game.shakeTimer = 0.5;
+        playSound('boss_kill');
       }
       game.enemies.splice(i, 1);
     }
@@ -1004,7 +1117,8 @@ function updateGame(dt) {
             }
             createParticle(proj.x, proj.y, '#e74c3c', 12);
             game.shakeTimer = 0.15;
-          
+            playSound(proj.isMine ? 'mine_explode' : 'explosion');
+
             } else {
               e.hp -= proj.damage;
               e.hitFlash = 0.15;
@@ -1016,6 +1130,7 @@ function updateGame(dt) {
                 p.hp = Math.min(p.hp + p.lifesteal, p.maxHp);
               }
               createParticle(e.x, e.y, '#fff', 3);
+              playSound('enemy_hit');
             }
             if (!proj.penetrate) destroyed = true;
             break;
@@ -1023,9 +1138,11 @@ function updateGame(dt) {
         }
         // Enemy projectile hits player
       } else if (!proj.fromPlayer && dist(proj, p) < proj.radius + p.radius) {
-        p.hp -= proj.damage;
+        const pDmg = Math.max(0, proj.damage - p.armor);
+        p.hp -= pDmg;
         p.invincible = 0.3;
         createParticle(p.x, p.y, '#e74c3c', 6);
+        playSound('player_hit');
         destroyed = true;
         if (p.hp <= 0) { p.hp = 0; gameOver(); return; }
       }
@@ -1050,9 +1167,10 @@ function updateGame(dt) {
       pu.y += (p.y - pu.y) / d * speed * dt || 0;
     }
     
-    if (d < p.radius + pu.radius + 8) {
+    if (d < p.radius + pu.radius + 5) {
       game.materials += pu.amount;
       game.pickups.splice(i, 1);
+      playSound('pickup');
     }
   }
   
@@ -1142,9 +1260,9 @@ function render() {
     ctx.beginPath();
     ctx.arc(sx, sy, pu.radius, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = 'rgba(241,196,15,0.3)';
+    ctx.fillStyle = 'rgba(241,196,15,0.2)';
     ctx.beginPath();
-    ctx.arc(sx, sy, pu.radius + 3, 0, Math.PI * 2);
+    ctx.arc(sx, sy, pu.radius + 2, 0, Math.PI * 2);
     ctx.fill();
   }
   
@@ -1201,6 +1319,32 @@ function render() {
     ctx.stroke();
   }
   
+  // Draw orbiting weapons
+  const orbitRadius = 26;
+  const orbitSpeed = 2;
+  for (let i = 0; i < p.weapons.length; i++) {
+    const w = p.weapons[i];
+    const def = WEAPON_DEFS[w.id];
+    if (!def) continue;
+    const tierData = TIERS[w.tier || 0];
+    const ang = game.time * orbitSpeed + (i / p.weapons.length) * Math.PI * 2;
+    const ox = psx + Math.cos(ang) * orbitRadius;
+    const oy = psy + Math.sin(ang) * orbitRadius;
+    // Background circle with tier color
+    ctx.beginPath();
+    ctx.arc(ox, oy, 10, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fill();
+    ctx.strokeStyle = tierData.color;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    // Weapon icon
+    ctx.font = '14px serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(def.icon, ox, oy);
+  }
+
   // Draw projectiles
   for (const proj of game.projectiles) {
     if (proj.isMine) {
@@ -1271,9 +1415,11 @@ function updateHUD() {
   const p = game.player;
   document.getElementById('hpFill').style.width = `${(p.hp / p.maxHp) * 100}%`;
   document.getElementById('hpText').textContent = `${Math.ceil(p.hp)}/${p.maxHp}`;
+  document.getElementById('shieldDisplay').textContent = `🛡️ ${p.armor}`;
   document.getElementById('waveText').textContent = `波次: ${game.wave}/${CONFIG.TOTAL_WAVES}`;
   document.getElementById('levelText').textContent = `等级 ${game.level}`;
   document.getElementById('materialsText').textContent = `材料: ${game.materials}`;
+  document.getElementById('xpFill').style.width = `${Math.min(100, (game.xp / game.xpNext) * 100)}%`;
   
   // Stats panel (右上角)
   const waveRemaining = game.state === 'playing' ? Math.ceil(Math.max(0, CONFIG.WAVE_DURATION - game.waveTimer)) : 0;
@@ -1289,7 +1435,9 @@ function updateHUD() {
     if (i < p.weapons.length) {
       const w = p.weapons[i];
       const def = WEAPON_DEFS[w.id];
-      slot.innerHTML = `<div class="w-icon">${def.icon}</div><div>${def.name}</div>`;
+      const tierData = TIERS[w.tier || 0];
+      slot.style.borderColor = tierData.color;
+      slot.innerHTML = `<div class="w-icon">${def.icon}</div><div>${def.name}</div><div style="font-size:6px;color:${tierData.color}">${tierData.name}</div>`;
     } else {
       slot.innerHTML = '<div style="color:#333">-</div>';
     }
@@ -1307,9 +1455,159 @@ function updateHUD() {
   }
 }
 
+// ======================== AUDIO SYSTEM (Web Audio API) ========================
+let audioCtx = null;
+let noiseBuffer = null;
+
+function initAudio() {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const sr = audioCtx.sampleRate;
+    const len = Math.floor(sr * 0.5);
+    noiseBuffer = audioCtx.createBuffer(1, len, sr);
+    const d = noiseBuffer.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  }
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+}
+
+function noiseBurst(duration, volume, hpFreq) {
+  const src = audioCtx.createBufferSource();
+  src.buffer = noiseBuffer;
+  const gain = audioCtx.createGain();
+  gain.gain.setValueAtTime(volume * 0.5, audioCtx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+  if (hpFreq) {
+    const f = audioCtx.createBiquadFilter();
+    f.type = 'highpass'; f.frequency.value = hpFreq;
+    src.connect(f); f.connect(gain);
+  } else {
+    const f = audioCtx.createBiquadFilter();
+    f.type = 'lowpass'; f.frequency.value = 3000;
+    src.connect(f); f.connect(gain);
+  }
+  gain.connect(audioCtx.destination);
+  src.start();
+}
+
+function playTone(freq, duration, volume, type, startOffset) {
+  const t = audioCtx.currentTime + (startOffset || 0);
+  const osc = audioCtx.createOscillator();
+  osc.type = type || 'square';
+  osc.frequency.setValueAtTime(freq, t);
+  const gain = audioCtx.createGain();
+  gain.gain.setValueAtTime(volume * 0.35, t);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + duration);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start(t);
+  osc.stop(t + duration + 0.05);
+}
+
+function sweepTone(fromF, toF, duration, volume, type) {
+  const osc = audioCtx.createOscillator();
+  osc.type = type || 'sawtooth';
+  osc.frequency.setValueAtTime(fromF, audioCtx.currentTime);
+  osc.frequency.exponentialRampToValueAtTime(toF, audioCtx.currentTime + duration);
+  const gain = audioCtx.createGain();
+  gain.gain.setValueAtTime(volume * 0.3, audioCtx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + duration + 0.05);
+}
+
+function playSound(name) {
+  if (!audioCtx) initAudio();
+  try {
+    switch (name) {
+      case 'melee_hit':
+        noiseBurst(0.06, 0.45);
+        playTone(200, 0.08, 0.55, 'square');
+        break;
+      case 'pistol':
+        noiseBurst(0.04, 0.35, 1000);
+        playTone(1200, 0.05, 0.4, 'square');
+        break;
+      case 'rocket':
+        noiseBurst(0.35, 0.65, 100);
+        playTone(70, 0.3, 0.7, 'sawtooth');
+        playTone(50, 0.25, 0.5, 'sine');
+        break;
+      case 'smg':
+        noiseBurst(0.03, 0.25, 2000);
+        playTone(1500, 0.03, 0.3, 'square');
+        break;
+      case 'flamethrower':
+        noiseBurst(0.08, 0.2, 600);
+        sweepTone(700, 200, 0.08, 0.15, 'sawtooth');
+        break;
+      case 'laser':
+        sweepTone(800, 2200, 0.12, 0.45, 'sine');
+        noiseBurst(0.08, 0.2, 3000);
+        break;
+      case 'mine_place':
+        playTone(2000, 0.06, 0.2, 'sine');
+        break;
+      case 'mine_explode':
+        noiseBurst(0.3, 0.55, 50);
+        playTone(40, 0.3, 0.75, 'sawtooth');
+        break;
+      case 'enemy_hit':
+        noiseBurst(0.03, 0.2);
+        playTone(300, 0.04, 0.3, 'square');
+        break;
+      case 'enemy_kill':
+        playTone(600, 0.06, 0.4, 'square');
+        playTone(900, 0.08, 0.3, 'sine');
+        break;
+      case 'player_hit':
+        playTone(100, 0.15, 0.6, 'sawtooth');
+        noiseBurst(0.08, 0.4, 80);
+        break;
+      case 'dodge':
+        sweepTone(1200, 2400, 0.08, 0.25, 'sine');
+        break;
+      case 'explosion':
+        noiseBurst(0.3, 0.65, 40);
+        playTone(45, 0.3, 0.8, 'sawtooth');
+        break;
+      case 'pickup':
+        playTone(800, 0.08, 0.35, 'sine');
+        setTimeout(() => playTone(1200, 0.1, 0.3, 'sine'), 50);
+        break;
+      case 'level_up':
+        playTone(523, 0.12, 0.45, 'sine');
+        setTimeout(() => playTone(659, 0.12, 0.45, 'sine'), 100);
+        setTimeout(() => playTone(784, 0.15, 0.45, 'sine'), 200);
+        break;
+      case 'buy':
+        playTone(600, 0.06, 0.35, 'sine');
+        setTimeout(() => playTone(900, 0.08, 0.35, 'sine'), 70);
+        break;
+      case 'wave_start':
+        playTone(400, 0.1, 0.35, 'square');
+        setTimeout(() => playTone(600, 0.15, 0.35, 'square'), 120);
+        break;
+      case 'boss_spawn':
+        playTone(55, 0.6, 0.6, 'sawtooth');
+        noiseBurst(0.5, 0.45, 30);
+        break;
+      case 'boss_kill':
+        playTone(35, 0.6, 0.85, 'sawtooth');
+        noiseBurst(0.7, 0.75, 15);
+        setTimeout(() => { playTone(200, 0.15, 0.5, 'sine'); }, 300);
+        setTimeout(() => { playTone(400, 0.25, 0.4, 'sine'); }, 450);
+        break;
+    }
+  } catch (e) { /* audio not available */ }
+}
+
 // ======================== GAME FLOW ========================
 function gameOver() {
   game.state = 'gameover';
+  saveRecord('defeat');
   showOverlay('defeat');
 }
 
@@ -1343,6 +1641,7 @@ function restartGame() {
 }
 
 function initGame() {
+  const prevDiff = game.difficulty || 'normal';
   game.state = "menu";
   game.wave = 1;
   game.level = 1;
@@ -1350,6 +1649,7 @@ function initGame() {
   game.xpNext = 5;
   game.materials = 0;
   game.enemiesKilled = 0;
+  game.totalDamageDealt = 0;
   game.time = 0;
   game.enemies = [];
   game.projectiles = [];
@@ -1363,7 +1663,17 @@ function initGame() {
   game.waveEnemiesTotal = 0;
   game.character = null;
   game.materialBonus = 0;
+  game.difficulty = prevDiff;
+  game.enemyMult = (DIFFICULTIES[prevDiff] || DIFFICULTIES.normal).enemyMult;
   showCharacterSelect();
+}
+
+function setDifficulty(id) {
+  if (DIFFICULTIES[id]) {
+    game.difficulty = id;
+    game.enemyMult = DIFFICULTIES[id].enemyMult;
+    showCharacterSelect();
+  }
 }
 
 function startGame(charId) {
@@ -1380,9 +1690,21 @@ function showCharacterSelect() {
   document.getElementById("overlay").classList.add("show");
   document.getElementById("overlayTitle").textContent = "土豆兄弟";
   document.getElementById("overlayTitle").style.color = "#f1c40f";
-  document.getElementById("overlaySub").textContent = "选择你的角色";
+  document.getElementById("overlaySub").textContent = "选择难度与角色";
   document.getElementById("restartBtn").style.display = "none";
-  let html = "<div class=\"char-grid\">";
+  const curDiff = game.difficulty || 'normal';
+  let html = '<div style="margin-bottom:10px">';
+  html += '<div style="font-size:10px;color:#aaa;margin-bottom:4px">难度选择:</div>';
+  html += '<div style="display:flex;gap:6px;justify-content:center">';
+  for (const [id, d] of Object.entries(DIFFICULTIES)) {
+    const active = id === curDiff ? 'border-color:#f1c40f;background:rgba(241,196,15,0.15)' : '';
+    html += `<div onclick="setDifficulty('${id}')" style="cursor:pointer;padding:4px 12px;border:1px solid #555;font-size:10px;${active}">`;
+    html += `<div style="color:${id === curDiff ? '#f1c40f' : '#fff'}">${d.label}</div>`;
+    html += `<div style="font-size:7px;color:#888">${d.desc}</div></div>`;
+  }
+  html += '</div></div>';
+  html += '<div style="font-size:9px;color:#888;margin-bottom:6px">选择角色</div>';
+  html += "<div class=\"char-grid\">";
   for (const c of CHARACTERS) {
     html += "<div class=\"char-card\" onclick=\"startGame('" + c.id + "')\">";
     html += "<div class=\"c-icon\">" + c.icon + "</div>";
@@ -1393,6 +1715,66 @@ function showCharacterSelect() {
   }
   html += "</div>";
   html += "<div style=\"font-size:9px;color:#666;margin-top:8px\">WASD移动 · 自动攻击 · 每关30秒 · 20波挑战</div>";
+  html += "<div style=\"margin-top:8px\"><button onclick=\"showRecords()\" style=\"padding:4px 16px;font-size:10px;background:#555;color:#fff;border:none;cursor:pointer;font-family:'Courier New',monospace\">📊 历史记录</button></div>";
+  document.getElementById("overlayContent").innerHTML = html;
+}
+
+// ======================== RECORDS SYSTEM ========================
+function saveRecord(result) {
+  const records = JSON.parse(localStorage.getItem('brotato_records') || '[]');
+  const ch = CHARACTERS.find(c => c.id === game.character);
+  records.unshift({
+    date: new Date().toLocaleString('zh-CN'),
+    result: result,
+    wave: game.wave,
+    level: game.level,
+    enemiesKilled: game.enemiesKilled,
+    character: ch ? ch.name : '未知',
+    difficulty: DIFFICULTIES[game.difficulty]?.label || '普通',
+  });
+  if (records.length > 50) records.length = 50;
+  localStorage.setItem('brotato_records', JSON.stringify(records));
+}
+
+function showRecords() {
+  const records = JSON.parse(localStorage.getItem('brotato_records') || '[]');
+  document.getElementById("overlayTitle").textContent = "📊 历史记录";
+  document.getElementById("overlayTitle").style.color = "#8e44ad";
+  document.getElementById("overlaySub").textContent = records.length + " 条记录";
+  document.getElementById("restartBtn").style.display = "block";
+  document.getElementById("restartBtn").textContent = "返回";
+  document.getElementById("restartBtn").onclick = () => { document.getElementById("overlay").classList.remove("show"); showCharacterSelect(); };
+
+  let html = "";
+  if (records.length === 0) {
+    html = "<div style=\"font-size:11px;color:#666;margin:20px\">暂无记录</div>";
+  } else {
+    html = `<div style="max-height:300px;overflow-y:auto;margin:8px 0;font-size:9px">
+      <table style="width:100%;border-collapse:collapse">
+        <tr style="color:#888;border-bottom:1px solid #444">
+          <th style="padding:3px 6px;text-align:left">时间</th>
+          <th style="padding:3px 6px;text-align:left">角色</th>
+          <th style="padding:3px 6px;text-align:left">难度</th>
+          <th style="padding:3px 6px;text-align:right">波次</th>
+          <th style="padding:3px 6px;text-align:right">等级</th>
+          <th style="padding:3px 6px;text-align:right">击杀</th>
+          <th style="padding:3px 6px;text-align:center">结果</th>
+        </tr>`;
+    for (const r of records) {
+      const resultColor = r.result === 'victory' ? '#f1c40f' : '#e74c3c';
+      const resultText = r.result === 'victory' ? '胜利' : '失败';
+      html += `<tr style="border-bottom:1px solid #333">
+        <td style="padding:3px 6px;color:#666">${r.date}</td>
+        <td style="padding:3px 6px;color:#fff">${r.character}</td>
+        <td style="padding:3px 6px;color:#aaa">${r.difficulty}</td>
+        <td style="padding:3px 6px;text-align:right;color:#f39c12">${r.wave}</td>
+        <td style="padding:3px 6px;text-align:right;color:#2ecc71">${r.level}</td>
+        <td style="padding:3px 6px;text-align:right;color:#fff">${r.enemiesKilled}</td>
+        <td style="padding:3px 6px;text-align:center;color:${resultColor}">${resultText}</td>
+      </tr>`;
+    }
+    html += "</table></div>";
+  }
   document.getElementById("overlayContent").innerHTML = html;
 }
 
