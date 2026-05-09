@@ -87,7 +87,7 @@ const CONFIG = {
   ARENA_W: 1600, ARENA_H: 1200,
   TOTAL_WAVES: 20,
   PLAYER_RADIUS: 14,
-  MAX_WEAPONS: 6,
+  MAX_WEAPONS: 6, WAVE_DURATION: 30,
 };
 
 // ======================== SPRITE DATA (16x16 pixel art) ========================
@@ -229,6 +229,7 @@ const game = {
   projectiles: [],
   pickups: [],
   particles: [],
+  damageNumbers: [],
   shakeTimer: 0,
   freezeFrames: 0,
 };
@@ -357,22 +358,37 @@ function createParticle(x, y, color, count) {
   }
 }
 
+function createDamageNumber(x, y, amount, color) {
+  game.damageNumbers.push({
+    x, y,
+    text: Math.ceil(amount).toString(),
+    color: color || '#fff',
+    life: 1.0,
+    maxLife: 1.0,
+    vy: -50 - Math.random() * 30,
+    vx: (Math.random() - 0.5) * 30,
+  });
+}
+
 // ======================== WEAPON SYSTEM ========================
 function fireWeapon(player, weapon, enemy) {
+  const def = WEAPON_DEFS[weapon.id];
+  if (!def) return 0;
   const dx = enemy.x - player.x;
   const dy = enemy.y - player.y;
   const angle = Math.atan2(dy, dx);
-  const range = (weapon.range || 60) * player.rngMult;
+  const range = (def.range || 60) * player.rngMult;
   const dist = Math.sqrt(dx * dx + dy * dy);
-  const cd = weapon.cooldown / player.aspdMult;
+  const cd = def.cooldown / player.aspdMult;
 
-  if (weapon.type === 'melee') {
+  if (def.type === 'melee') {
     if (dist <= range) {
-      const dmg = weapon.damage * player.dmgMult;
-      const knockX = Math.cos(angle) * weapon.knockback;
-      const knockY = Math.sin(angle) * weapon.knockback;
+      const dmg = def.damage * player.dmgMult;
+      const knockX = Math.cos(angle) * def.knockback;
+      const knockY = Math.sin(angle) * def.knockback;
       enemy.hp -= dmg;
       enemy.hitFlash = 0.15;
+      createDamageNumber(enemy.x, enemy.y, dmg, '#f39c12');
       enemy.vx += knockX * 0.5;
       enemy.vy += knockY * 0.5;
       if (player.lifesteal > 0) {
@@ -381,7 +397,7 @@ function fireWeapon(player, weapon, enemy) {
       createParticle(enemy.x, enemy.y, '#fff', 3);
     }
   } else {
-    const proj = createProjectile(player.x, player.y, angle, weapon, player);
+    const proj = createProjectile(player.x, player.y, angle, def, player);
     game.projectiles.push(proj);
   }
   return cd;
@@ -391,9 +407,11 @@ function updateWeapons(player, dt) {
   for (const weapon of player.weapons) {
     weapon.cd -= dt;
     if (weapon.cd <= 0) {
+      const def = WEAPON_DEFS[weapon.id];
+      if (!def) continue;
       let target = null;
       let minDist = Infinity;
-      const range = (weapon.range || 60) * player.rngMult;
+      const range = (def.range || 60) * player.rngMult;
       for (const enemy of game.enemies) {
         const dx = enemy.x - player.x;
         const dy = enemy.y - player.y;
@@ -419,7 +437,9 @@ function getWaveEnemies(wave) {
 }
 
 function getSpawnInterval(wave) {
-  return Math.max(0.3, 1.8 - wave * 0.06);
+  const counts = getWaveEnemies(wave);
+  const total = counts.basic + counts.fast + counts.heavy;
+  return Math.max(0.25, Math.min(CONFIG.WAVE_DURATION / Math.max(total, 1), 2.5));
 }
 
 function spawnEnemy() {
@@ -459,16 +479,17 @@ function startWave() {
   game.spawnTimer = 0;
 }
 
-function checkWaveClear() {
-  if (game.waveEnemiesSpawned >= game.waveEnemiesTotal && game.enemies.length === 0) {
-    if (game.wave >= CONFIG.TOTAL_WAVES) {
-      game.state = 'won';
-      showOverlay('victory');
-      return;
-    }
-    game.materials += 5; // wave completion bonus
-    showShop();
+function endWave() {
+  if (game.state !== 'playing') return;
+  game.enemies = [];
+  game.projectiles = [];
+  game.materials += 3 + game.wave * 2; // wave completion bonus
+  if (game.wave >= CONFIG.TOTAL_WAVES) {
+    game.state = 'won';
+    showOverlay('victory');
+    return;
   }
+  showShop();
 }
 
 // ======================== SHOP & UPGRADE ========================
@@ -745,8 +766,10 @@ function updateGame(dt) {
             // AOE explosion
             for (const other of game.enemies) {
               if (dist(proj, other) < proj.aoe) {
-                other.hp -= proj.damage * 0.7;
+                const aoeDmg = proj.damage * 0.7;
+                other.hp -= aoeDmg;
                 other.hitFlash = 0.15;
+                createDamageNumber(other.x, other.y, aoeDmg, '#e74c3c');
                 const ang = Math.atan2(other.y - proj.y, other.x - proj.x);
                 other.vx += Math.cos(ang) * proj.knockback * 0.5;
                 other.vy += Math.sin(ang) * proj.knockback * 0.5;
@@ -760,6 +783,7 @@ function updateGame(dt) {
           } else {
             e.hp -= proj.damage;
             e.hitFlash = 0.15;
+            createDamageNumber(e.x, e.y, proj.damage, '#fff');
             const ang = Math.atan2(e.y - proj.y, e.x - proj.x);
             e.vx += Math.cos(ang) * proj.knockback;
             e.vy += Math.sin(ang) * proj.knockback;
@@ -810,8 +834,21 @@ function updateGame(dt) {
     if (pt.life <= 0) game.particles.splice(i, 1);
   }
   
-  // Check wave clear
-  checkWaveClear();
+  // Update damage numbers
+  for (let i = game.damageNumbers.length - 1; i >= 0; i--) {
+    const dn = game.damageNumbers[i];
+    dn.y += dn.vy * dt;
+    dn.x += dn.vx * dt;
+    dn.life -= dt;
+    if (dn.life <= 0) game.damageNumbers.splice(i, 1);
+  }
+  
+  // Wave timer (30-second waves)
+  game.waveTimer += dt;
+  if (game.waveTimer >= CONFIG.WAVE_DURATION) {
+    endWave();
+    return;
+  }
   
   // Level up check
   if (game.xp >= game.xpNext && game.state === 'playing') {
@@ -884,11 +921,11 @@ function render() {
     const sy = e.y - cam.y;
     const spriteSize = e.size;
     
+    const flashAlpha = Math.min(e.hitFlash * 5, 0.6);
+    drawSprite(ctx, e.sprite, PALETTE, sx - spriteSize/2, sy - spriteSize/2, spriteSize, e.color);
     if (e.hitFlash > 0) {
-      ctx.fillStyle = '#fff';
+      ctx.fillStyle = `rgba(255,0,0,${flashAlpha})`;
       ctx.fillRect(sx - spriteSize/2, sy - spriteSize/2, spriteSize, spriteSize);
-    } else {
-      drawSprite(ctx, e.sprite, PALETTE, sx - spriteSize/2, sy - spriteSize/2, spriteSize, e.color);
     }
     
     // HP bar for heavy enemies
@@ -958,6 +995,22 @@ function render() {
     ctx.fillRect(sx - pt.radius/2, sy - pt.radius/2, pt.radius, pt.radius);
   }
   ctx.globalAlpha = 1;
+
+  // Draw damage numbers
+  for (const dn of game.damageNumbers) {
+    const sx = dn.x - cam.x;
+    const sy = dn.y - cam.y;
+    const alpha = dn.life / dn.maxLife;
+    ctx.globalAlpha = alpha;
+    ctx.font = 'bold 14px "Courier New", monospace';
+    ctx.textAlign = 'center';
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 3;
+    ctx.strokeText(dn.text, sx, sy);
+    ctx.fillStyle = dn.color;
+    ctx.fillText(dn.text, sx, sy);
+  }
+  ctx.globalAlpha = 1;
   
   ctx.restore();
 }
@@ -970,9 +1023,10 @@ function updateHUD() {
   document.getElementById('levelText').textContent = `等级 ${game.level}`;
   document.getElementById('materialsText').textContent = `材料: ${game.materials}`;
   
-  // Stats panel
+  // Stats panel (右上角)
+  const waveRemaining = game.state === 'playing' ? Math.ceil(Math.max(0, CONFIG.WAVE_DURATION - game.waveTimer)) : 0;
   document.getElementById('statsPanel').innerHTML =
-    `⚔️ ${(p.dmgMult * 100).toFixed(0)}% ⏩ ${(p.aspdMult * 100).toFixed(0)}% 🛡️ ${p.armor}`;
+    `⏱ ${waveRemaining}s &nbsp;⚔️ ${(p.dmgMult * 100).toFixed(0)}% ⏩ ${(p.aspdMult * 100).toFixed(0)}% 🛡️ ${p.armor}`;
   
   // Weapon bar
   const wbar = document.getElementById('weapon-bar');
@@ -1039,6 +1093,7 @@ function initGame() {
   game.projectiles = [];
   game.pickups = [];
   game.particles = [];
+  game.damageNumbers = [];
   game.shakeTimer = 0;
   game.freezeFrames = 0;
   game.player = createPlayer();
@@ -1048,16 +1103,16 @@ function initGame() {
   showOverlay('menu');
   document.getElementById('overlayTitle').textContent = '土豆兄弟';
   document.getElementById('overlayTitle').style.color = '#f1c40f';
-  document.getElementById('overlaySub').textContent = 'WASD 移动 · 自动攻击 · 存活20波';
+  document.getElementById('overlaySub').textContent = 'WASD 移动 · 自动攻击 · 每关30秒';
   document.getElementById('overlayContent').innerHTML = `
     <div style="font-size:10px;color:#888;margin:8px 0;line-height:1.6">
       💀 消灭敌人收集材料<br>
       🛒 波次间在商店购买装备<br>
       ⬆️ 升级选择强化属性<br>
-      🏆 存活20波即可获胜!
+      🏆 存活20波（每关30秒）即可获胜!
     </div>
     <div style="font-size:9px;color:#666;margin-top:8px">
-      3种武器 · 3种敌人 · 20波挑战
+      3种武器 · 3种敌人 · 20波挑战 · 30秒时限
     </div>
   `;
   document.getElementById('restartBtn').textContent = '开始游戏';
