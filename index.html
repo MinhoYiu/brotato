@@ -64,6 +64,10 @@ canvas{display:block;background:#1a1a2e;border:2px solid #333}
 .char-card .c-desc{font-size:8px;color:#888;margin-top:2px}
 .char-card .c-trait{font-size:8px;color:#2ecc71;margin-top:4px}
 .char-card .c-stats{font-size:7px;color:#aaa;margin-top:2px}
+#pauseOverlay{display:none;position:absolute;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.55);flex-direction:column;justify-content:center;align-items:center;z-index:8;pointer-events:auto}
+#pauseOverlay .pause-title{font-size:36px;color:#fff;text-shadow:2px 2px 0 #000}
+#pauseOverlay .pause-hint{font-size:13px;color:#aaa;margin-top:12px}
+#pauseOverlay .pause-hint kbd{color:#f1c40f;border:1px solid #555;padding:1px 6px;border-radius:3px;font-size:11px}
 </style>
 </head>
 <body>
@@ -95,6 +99,11 @@ canvas{display:block;background:#1a1a2e;border:2px solid #333}
 <div class="sub" id="overlaySub">你阵亡了</div>
 <div id="overlayContent"></div>
 <button id="restartBtn" style="display:none">重新开始</button>
+</div>
+<div id="pauseOverlay">
+  <div class="pause-title">⏸ 已暂停</div>
+  <div class="pause-hint">按 <kbd>ESC</kbd> 继续</div>
+  <div class="pause-hint" style="margin-top:6px;font-size:11px;color:#666">按 <kbd>Tab</kbd> 查看属性</div>
 </div>
 </div>
 </div>
@@ -268,6 +277,7 @@ const game = {
   pickups: [],
   particles: [],
   damageNumbers: [],
+  showCombatStats: false,
   shakeTimer: 0,
   freezeFrames: 0, character: null, materialBonus: 0, difficulty: 'normal', enemyMult: 1.0, bossActive: false, bossSpawned: false, bossDefeated: false,
   freezeFrames: 0, character: null, materialBonus: 0, bossActive: false, bossSpawned: false, bossDefeated: false,
@@ -522,7 +532,6 @@ function fireWeapon(player, weapon, enemy) {
     }
   } else if (def.type === 'mine') {
     const mine = createProjectile(player.x, player.y, angle, def, player, tier.mult);
-    const mine = createProjectile(player.x, player.y, angle, def, player);
     mine.vx = 0; mine.vy = 0;
     mine.isMine = true;
     mine.radius = 6;
@@ -533,9 +542,6 @@ function fireWeapon(player, weapon, enemy) {
     const proj = createProjectile(player.x, player.y, angle, def, player, tier.mult);
     game.projectiles.push(proj);
     if (def.sound) playSound(def.sound);
-    if (player.passives.bulletSplit > 0 && Math.random() < player.passives.bulletSplit) {
-      const splitAngle = angle + (Math.random() - 0.5) * 0.8;
-      const splitProj = createProjectile(player.x, player.y, splitAngle, def, player, tier.mult);
     if (player.passives.bulletSplit > 0 && Math.random() < player.passives.bulletSplit) {
       const splitAngle = angle + (Math.random() - 0.5) * 0.8;
       const splitProj = createProjectile(player.x, player.y, splitAngle, def, player, tier.mult);
@@ -580,13 +586,6 @@ function getWaveEnemies(wave) {
   const exploder = wave >= 6 ? Math.floor((wave - 4) * 1.0 * mult) : 0;
   const summoner = wave >= 8 ? Math.floor((wave - 6) * 0.8 * mult) : 0;
   const elite = wave >= 10 ? Math.floor((wave - 8) * 0.6 * mult) : 0;
-  const basic = 3 + wave * 2;
-  const fast = wave >= 2 ? Math.floor((wave - 1) * 1.2) : 0;
-  const heavy = wave >= 3 ? Math.floor((wave - 2) * 0.8) : 0;
-  const ranged = wave >= 4 ? Math.floor((wave - 2) * 0.7) : 0;
-  const exploder = wave >= 6 ? Math.floor((wave - 4) * 0.5) : 0;
-  const summoner = wave >= 8 ? Math.floor((wave - 6) * 0.4) : 0;
-  const elite = wave >= 10 ? Math.floor((wave - 8) * 0.3) : 0;
   return { basic, fast, heavy, ranged, exploder, summoner, elite };
 }
 
@@ -760,17 +759,21 @@ function showShop() {
   document.getElementById('overlaySub').textContent = `波次 ${game.wave} 结束`;
   document.getElementById('restartBtn').style.display = 'none';
 
-  // Generate mixed pool: shop items + weapons with wave-based tier
+  // Generate weapons-only pool
   const pool = [];
-  for (const item of SHOP_ITEMS) {
-    pool.push({ type: 'item', id: item.id, name: item.icon + ' ' + item.name, icon: item.icon, cost: item.cost, desc: item.desc, _item: item });
-  }
   for (const [wid, def] of Object.entries(WEAPON_DEFS)) {
     if (wid === 'stick') continue;
     const tier = getWeaponShopTier(game.wave);
     const tierData = TIERS[tier];
     const cost = Math.floor(def.cost * TIER_COST_MULT[tier]);
-    pool.push({ type: 'weapon', id: 'w_' + wid, name: def.icon + ' ' + def.name, icon: def.icon, cost, desc: tierData.name + ' · ' + def.desc, weaponId: wid, tier, tierColor: tierData.color });
+    pool.push({
+      type: 'weapon', id: 'w_' + wid,
+      name: def.icon + ' ' + def.name,
+      icon: def.icon, cost,
+      desc: def.desc,
+      tier, tierName: tierData.name, tierColor: tierData.color,
+      weaponId: wid,
+    });
   }
   // Shuffle
   for (let i = pool.length - 1; i > 0; i--) {
@@ -790,19 +793,13 @@ function renderShop() {
   html += '<div class="shop-grid">';
 
   for (const entry of game.shopItems) {
-    let disabled, onclick;
-    if (entry.type === 'item') {
-      disabled = game.materials < entry.cost;
-      onclick = `buyShopItem('${entry.id}')`;
-    } else {
-      const owned = p.weapons.some(w => w.id === entry.weaponId);
-      const maxWeapons = p.weapons.length >= CONFIG.MAX_WEAPONS;
-      disabled = game.materials < entry.cost || owned || maxWeapons;
-      onclick = `buyWeapon('${entry.weaponId}',${entry.tier},${entry.cost})`;
-    }
-    html += `<div class="shop-item${disabled ? ' disabled' : ''}" onclick="${onclick}">`;
-    html += `<div class="name">${entry.name}</div>`;
-    html += `<div class="cost">💰 ${entry.cost}</div>`;
+    const owned = p.weapons.some(w => w.id === entry.weaponId);
+    const maxWeapons = p.weapons.length >= CONFIG.MAX_WEAPONS;
+    const disabled = game.materials < entry.cost || owned || maxWeapons;
+    const tierColor = entry.tierColor || '#555';
+    html += `<div class="shop-item${disabled ? ' disabled' : ''}" style="border-color:${tierColor}" onclick="${disabled ? '' : `buyWeapon('${entry.weaponId}',${entry.tier},${entry.cost})`}">`;
+    html += `<div class="name" style="color:${tierColor}">${entry.name}</div>`;
+    html += `<div class="cost">💰 ${entry.cost} · <span style="color:${tierColor}">${entry.tierName}</span></div>`;
     html += `<div class="desc">${entry.desc}</div>`;
     html += '</div>';
   }
@@ -846,18 +843,6 @@ function renderShop() {
   content.innerHTML = html;
 }
 
-function buyShopItem(id) {
-  const idx = game.shopItems.findIndex(i => i.id === id && i.type === 'item');
-  if (idx === -1) return;
-  const entry = game.shopItems[idx];
-  if (game.materials < entry.cost) return;
-  game.materials -= entry.cost;
-  entry._item.effect(game.player);
-  game.shopItems.splice(idx, 1);
-  playSound('buy');
-  renderShop();
-}
-
 function buyWeapon(id, tier, cost) {
   const p = game.player;
   if (p.weapons.length >= CONFIG.MAX_WEAPONS) return;
@@ -877,15 +862,19 @@ function rerollShop() {
   game.materials -= cost;
   game.shopRerolls++;
   const pool = [];
-  for (const item of SHOP_ITEMS) {
-    pool.push({ type: 'item', id: item.id, name: item.icon + ' ' + item.name, icon: item.icon, cost: item.cost, desc: item.desc, _item: item });
-  }
   for (const [wid, def] of Object.entries(WEAPON_DEFS)) {
     if (wid === 'stick') continue;
     const tier = getWeaponShopTier(game.wave);
     const tierData = TIERS[tier];
     const wcost = Math.floor(def.cost * TIER_COST_MULT[tier]);
-    pool.push({ type: 'weapon', id: 'w_' + wid, name: def.icon + ' ' + def.name, icon: def.icon, cost: wcost, desc: tierData.name + ' · ' + def.desc, weaponId: wid, tier, tierColor: tierData.color });
+    pool.push({
+      type: 'weapon', id: 'w_' + wid,
+      name: def.icon + ' ' + def.name,
+      icon: def.icon, cost: wcost,
+      desc: def.desc,
+      tier, tierName: tierData.name, tierColor: tierData.color,
+      weaponId: wid,
+    });
   }
   for (let i = pool.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -929,13 +918,13 @@ function showLevelUp() {
   document.getElementById('overlaySub').textContent = `等级 ${game.level + 1}`;
   document.getElementById('restartBtn').style.display = 'none';
   
-  // Pick 3 random upgrades
-  const available = [...UPGRADES];
-  for (let i = available.length - 1; i > 0; i--) {
+  // Pick 3 random upgrades (stat boosts + passive items)
+  const pool = [...UPGRADES, ...SHOP_ITEMS];
+  for (let i = pool.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
-    [available[i], available[j]] = [available[j], available[i]];
+    [pool[i], pool[j]] = [pool[j], pool[i]];
   }
-  game.upgradeChoices = available.slice(0, 3);
+  game.upgradeChoices = pool.slice(0, 3);
   
   renderUpgrades();
 }
@@ -956,15 +945,21 @@ function renderUpgrades() {
 
 function applyUpgrade(id) {
   const p = game.player;
-  switch (id) {
-    case 'maxhp': p.maxHp += 4; p.hp += 4; break;
-    case 'dmg': p.dmgMult *= 1.2; break;
-    case 'aspd': p.aspdMult *= 1.2; break;
-    case 'armor': p.armor += 1; break;
-    case 'spd': p.spdMult *= 1.1; break;
-    case 'range': p.rngMult *= 1.15; break;
-    case 'regen': p.hp = Math.min(p.hp + 5, p.maxHp); break;
-    case 'lifesteal': p.lifesteal += 1; break;
+  const choice = game.upgradeChoices.find(c => c.id === id);
+  if (!choice) return;
+  if (choice.effect) {
+    choice.effect(p);
+  } else {
+    switch (id) {
+      case 'maxhp': p.maxHp += 4; p.hp += 4; break;
+      case 'dmg': p.dmgMult *= 1.2; break;
+      case 'aspd': p.aspdMult *= 1.2; break;
+      case 'armor': p.armor += 1; break;
+      case 'spd': p.spdMult *= 1.1; break;
+      case 'range': p.rngMult *= 1.15; break;
+      case 'regen': p.hp = Math.min(p.hp + 5, p.maxHp); break;
+      case 'lifesteal': p.lifesteal += 1; break;
+    }
   }
   game.level++;
   game.xp -= game.xpNext;
@@ -1111,15 +1106,8 @@ function updateGame(dt) {
           playSound('dodge');
         } else {
           p.hp -= dmg;
-        playSound('player_hit');
-        const dmg = Math.max(1, e.damage - p.armor);
-        if (p.passives.dodge > 0 && Math.random() < p.passives.dodge) {
-          createDamageNumber(p.x, p.y, 0, '#3498db');
-          playSound('dodge');
-        } else {
-          p.hp -= dmg;
-        playSound('player_hit');
-        if (p.passives.thorns > 0) {
+          playSound('player_hit');
+          if (p.passives.thorns > 0) {
             e.hp -= p.passives.thorns;
             createDamageNumber(e.x, e.y, p.passives.thorns, '#27ae60');
           }
@@ -1402,13 +1390,14 @@ function render() {
       ctx.fillRect(sx - spriteSize/2, sy - spriteSize/2, spriteSize, spriteSize);
     }
     
-    // HP bar for heavy enemies
-    if (e.type === 'heavy' && e.hp < e.maxHp) {
+    // HP bar for enemies that have taken damage
+    if (e.hp < e.maxHp) {
       const bw = spriteSize + 4;
+      const barY = sy - spriteSize/2 - 6;
       ctx.fillStyle = '#333';
-      ctx.fillRect(sx - bw/2, sy - spriteSize/2 - 6, bw, 3);
+      ctx.fillRect(sx - bw/2, barY, bw, 3);
       ctx.fillStyle = '#e74c3c';
-      ctx.fillRect(sx - bw/2, sy - spriteSize/2 - 6, bw * (e.hp / e.maxHp), 3);
+      ctx.fillRect(sx - bw/2, barY, bw * (e.hp / e.maxHp), 3);
     }
   }
   
@@ -1523,6 +1512,83 @@ function render() {
   ctx.globalAlpha = 1;
   
   ctx.restore();
+
+  // ======================== UI OVERLAYS (screen space) ========================
+  if (game.state === 'playing' || game.state === 'paused') {
+    const p = game.player;
+    if (!p) return;
+
+    // ---- Minimap (右上角) ----
+    const mmW = 140, mmH = 105;
+    const mmX = CONFIG.CANVAS_W - mmW - 8;
+    const mmY = 8;
+    const mmS = mmW / CONFIG.ARENA_W;
+
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(mmX, mmY, mmW, mmH);
+    ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(mmX, mmY, mmW, mmH);
+
+    // Arena border on minimap
+    ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+    ctx.strokeRect(mmX, mmY, CONFIG.ARENA_W * mmS, CONFIG.ARENA_H * mmS);
+
+    // Player dot
+    const mpx = mmX + p.x * mmS;
+    const mpy = mmY + p.y * mmS;
+    ctx.fillStyle = '#2ecc71';
+    ctx.beginPath();
+    ctx.arc(mpx, mpy, 3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Enemy dots
+    ctx.fillStyle = '#e74c3c';
+    for (const e of game.enemies) {
+      ctx.beginPath();
+      ctx.arc(mmX + e.x * mmS, mmY + e.y * mmS, 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Pickup dots
+    ctx.fillStyle = '#f1c40f';
+    for (const pu of game.pickups) {
+      ctx.beginPath();
+      ctx.arc(mmX + pu.x * mmS, mmY + pu.y * mmS, 1.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // ---- Combat Stats (左下角, Tab 切换) ----
+    if (game.showCombatStats) {
+      const sx = 8, sy = CONFIG.CANVAS_H - 170;
+      const sw = 195, sh = 162;
+      ctx.fillStyle = 'rgba(0,0,0,0.75)';
+      ctx.fillRect(sx, sy, sw, sh);
+      ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(sx, sy, sw, sh);
+
+      ctx.font = '11px "Courier New", monospace';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      const lines = [
+        { text: `HP: ${Math.ceil(p.hp)}/${p.maxHp}`, color: '#e74c3c' },
+        { text: `护甲: ${Math.max(0, p.armor)}`, color: '#3498db' },
+        { text: `伤害: ${(p.dmgMult * 100).toFixed(0)}%`, color: '#fff' },
+        { text: `攻速: ${(p.aspdMult * 100).toFixed(0)}%`, color: '#fff' },
+        { text: `移速: ${(p.spdMult * 100).toFixed(0)}%`, color: '#fff' },
+        { text: `射程: ${(p.rngMult * 100).toFixed(0)}%`, color: '#fff' },
+        { text: `生命偷取: ${p.lifesteal}`, color: '#e74c3c' },
+        { text: `闪避: ${(p.passives.dodge * 100).toFixed(0)}%`, color: '#2ecc71' },
+        { text: `荆棘: ${p.passives.thorns}`, color: '#27ae60' },
+        { text: `拾取范围: ${p.passives.magnetRange.toFixed(0)}`, color: '#f39c12' },
+      ];
+      for (let i = 0; i < lines.length; i++) {
+        ctx.fillStyle = lines[i].color;
+        ctx.fillText(lines[i].text, sx + 8, sy + 8 + i * 15);
+      }
+    }
+  }
 }
 
 function updateHUD() {
@@ -1757,6 +1823,7 @@ function showOverlay(type) {
 
 function restartGame() {
   document.getElementById('overlay').classList.remove('show');
+  document.getElementById('pauseOverlay').style.display = 'none';
   initGame();
 }
 
@@ -1785,17 +1852,7 @@ function initGame() {
   game.materialBonus = 0;
   game.difficulty = prevDiff;
   game.enemyMult = (DIFFICULTIES[prevDiff] || DIFFICULTIES.normal).enemyMult;
-  showCharacterSelect();
-}
-
-function setDifficulty(id) {
-  if (DIFFICULTIES[id]) {
-    game.difficulty = id;
-    game.enemyMult = DIFFICULTIES[id].enemyMult;
-    showCharacterSelect();
-  }
-}
-
+  game.showCombatStats = false;
   showCharacterSelect();
 }
 
@@ -1848,23 +1905,6 @@ function showCharacterSelect() {
   const combineLabel = gameSettings.combineCount === 2 ? '2把' : '3把';
   html += '<span style="color:#f1c40f;min-width:30px;display:inline-block;text-align:center">' + combineLabel + '</span>';
   html += '<button onclick="adjustSetting(\'combineCount\',0)" style="padding:2px 10px;font-size:10px;background:#555;color:#fff;border:none;cursor:pointer;font-family:\'Courier New\',monospace">切换</button>';
-  html += '</div></div>';
-  html += '<div style="font-size:9px;color:#888;margin-bottom:6px">选择角色</div>';
-  html += "<div class=\"char-grid\">";
-  for (const c of CHARACTERS) {
-    html += "<div class=\"char-card\" onclick=\"startGame('" + c.id + "')\">";
-  document.getElementById("overlaySub").textContent = "选择你的角色";
-  document.getElementById("restartBtn").style.display = "none";
-  const curDiff = game.difficulty || 'normal';
-  let html = '<div style="margin-bottom:10px">';
-  html += '<div style="font-size:10px;color:#aaa;margin-bottom:4px">难度选择:</div>';
-  html += '<div style="display:flex;gap:6px;justify-content:center">';
-  for (const [id, d] of Object.entries(DIFFICULTIES)) {
-    const active = id === curDiff ? 'border-color:#f1c40f;background:rgba(241,196,15,0.15)' : '';
-    html += `<div onclick="setDifficulty('${id}')" style="cursor:pointer;padding:4px 12px;border:1px solid #555;font-size:10px;${active}">`;
-    html += `<div style="color:${id === curDiff ? '#f1c40f' : '#fff'}">${d.label}</div>`;
-    html += `<div style="font-size:7px;color:#888">${d.desc}</div></div>`;
-  }
   html += '</div></div>';
   html += '<div style="font-size:9px;color:#888;margin-bottom:6px">选择角色</div>';
   html += "<div class=\"char-grid\">";
@@ -1966,6 +2006,21 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
   }
   if (key === 'r') restartGame();
+  if (key === 'escape') {
+    if (game.state === 'playing') {
+      game.state = 'paused';
+      document.getElementById('pauseOverlay').style.display = 'flex';
+    } else if (game.state === 'paused') {
+      game.state = 'playing';
+      document.getElementById('pauseOverlay').style.display = 'none';
+    }
+  }
+  if (key === 'tab') {
+    e.preventDefault();
+    if (game.state === 'playing' || game.state === 'paused') {
+      game.showCombatStats = !game.showCombatStats;
+    }
+  }
 });
 
 window.addEventListener('keyup', (e) => {
